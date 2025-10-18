@@ -1,0 +1,110 @@
+import sys
+import pygame
+from tylershand import Hand
+from piano_constants import *
+
+PROGRESS_BAR_HEIGHT = 12
+PROGRESS_BAR_MARGIN_TOP = 4
+
+BG_COLOR = (255, 255, 255)
+WHITE_KEY_COLOR = (255, 255, 255)
+WHITE_KEY_OUTLINE = (0, 0, 0)
+LABEL_COLOR = (0, 0, 0)
+
+kb_height = HEIGHT - 2 * MARGIN - PROGRESS_BAR_HEIGHT - PROGRESS_BAR_MARGIN_TOP
+kb_rect = pygame.Rect(MARGIN, MARGIN, WIDTH - 2 * MARGIN, kb_height)
+hand = Hand(position=(kb_rect.x + 10, kb_rect.y + 10), size=(WIDTH//NUM_WHITE_KEYS*5, 100))
+
+# Progress bar 
+bar_width = kb_rect.width
+bar_x = kb_rect.x
+bar_y = kb_rect.bottom + PROGRESS_BAR_MARGIN_TOP
+bg_rect = pygame.Rect(bar_x, bar_y, bar_width, PROGRESS_BAR_HEIGHT)
+fill_rect = pygame.Rect(bar_x, bar_y, 0, PROGRESS_BAR_HEIGHT)
+
+def build_white_keys(rect: pygame.Rect, n: int):
+	keys = []
+	key_w = rect.width // n
+	for i in range(n):
+		label = str(i)
+		r = pygame.Rect(rect.x + i * key_w, rect.y, key_w, rect.height)
+		keys.append((label, r))
+	return keys
+
+def main():
+	pygame.init()
+	screen = pygame.display.set_mode((WIDTH, HEIGHT))
+	clock = pygame.time.Clock()
+
+	font = pygame.font.SysFont(None, 18)
+
+	
+	white_keys = build_white_keys(kb_rect, NUM_WHITE_KEYS)
+
+	total_duration = hand.start_times[-1]
+
+	elaspedTime = 0
+	running = True
+	pause = False
+
+	while running:
+		dt = clock.tick(FPS) / 1000
+		for event in pygame.event.get():
+			if event.type == pygame.QUIT:
+				running = False
+				break
+			elif event.type == pygame.KEYDOWN:
+				if event.key in (pygame.K_LEFT, pygame.K_a):
+					elaspedTime -= 1
+				elif event.key in (pygame.K_RIGHT, pygame.K_d):
+					elaspedTime += 1
+				elif event.key == pygame.K_SPACE:
+					pause = not pause
+
+		hand.play(elaspedTime)
+		# Update time only when not paused
+		if not pause:
+			elaspedTime += dt
+		elaspedTime = min(max(elaspedTime, 0), total_duration)
+		screen.fill(BG_COLOR)
+		# Determine which key to highlight based on current thumb position
+		thumb_scalar = hand.fingerData.loc[hand.index, 'thumb_pos']
+		highlight_idx = int(float(f"{thumb_scalar}"))
+
+		# Draw white keys
+		for label, r in white_keys:
+			key_index = int(label)
+			if key_index == highlight_idx:
+				pygame.draw.rect(screen, (255, 240, 160), r)
+			else:
+				pygame.draw.rect(screen, WHITE_KEY_COLOR, r)
+			pygame.draw.rect(screen, WHITE_KEY_OUTLINE, r, width=2)
+			text = font.render(label, True, LABEL_COLOR)
+			screen.blit(text, (r.centerx - text.get_width()/2, r.bottom - text.get_height()))
+
+		# Progress bar calculations
+		progress = max(0, min(1, elaspedTime / total_duration))
+		fill_rect.size = (int(bar_width * progress), PROGRESS_BAR_HEIGHT)
+		# Draw background and fill
+		pygame.draw.rect(screen, (255, 255, 255), bg_rect)
+		if fill_rect.width > 0:
+			pygame.draw.rect(screen, (255, 255, 0), fill_rect)
+			pygame.draw.rect(screen, (0, 0, 0), fill_rect, width=1)
+		# Outline
+		pygame.draw.rect(screen, (0, 0, 0), bg_rect, width=1)
+		# Optional progress text
+		# Show elapsed / total seconds text instead of percentage
+		elapsed_text = font.render(f"{elaspedTime:.1f}s / {total_duration:.1f}s", True, (40, 40, 40))
+		screen.blit(elapsed_text, (bg_rect.centerx - elapsed_text.get_width()//2, bg_rect.centery - elapsed_text.get_height()//2))
+
+		hand.draw(screen)
+
+		pygame.display.flip()
+
+	pygame.quit()
+	return 0
+
+
+if __name__ == "__main__":
+	sys.exit(main())
+
