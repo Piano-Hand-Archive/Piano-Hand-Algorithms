@@ -1,5 +1,7 @@
 import sys
 import pygame
+import matplotlib.pyplot as plt
+import matplotlib.patches as mpatches
 from tylershand import Hand
 from piano_constants import *
 
@@ -54,6 +56,49 @@ def _midi_to_white_index(midi: int):
 def note_name_to_white_index(note_name: str):
 	midi = _note_name_to_midi(note_name)
 	return _midi_to_white_index(midi) if midi is not None else None
+def create_legend_image(filename="legend.png"):
+    WHITE_KEY_COLOR = (1, 1, 1)
+    HIGHLIGHT_COLOR = (1, 138/255, 138/255)
+    HAND_COLOR = (0, 1, 1)
+
+    #white_patch = mpatches.Patch(facecolor=WHITE_KEY_COLOR, edgecolor='black', label='Idle Key')
+    highlight_patch = mpatches.Patch(facecolor=HIGHLIGHT_COLOR, edgecolor='black', label='Key Played by Thumb')
+    hand_patch = mpatches.Patch(facecolor=HAND_COLOR, edgecolor='black', label='Hand Position')
+
+    fig, ax = plt.subplots(figsize=(3, 2))
+
+    # Place the legend to the right
+    ax.legend(
+        handles=[highlight_patch, hand_patch],
+        loc='center left',
+        bbox_to_anchor=(1, 0.5),
+        frameon=True,
+        title="Visualizer Legend"
+    )
+
+    ax.axis('off')
+    plt.tight_layout()
+    plt.savefig(filename, dpi=150, bbox_inches='tight', transparent=True)
+    plt.close()
+
+#dictionary of key pair:distance
+white_keys = ["C", "D", "E", "F", "G", "A", "B"]
+octaves = range(1, 8)
+
+# Build full list of white keys across octaves
+all_white_keys = [f"{note}{octave}" for octave in octaves for note in white_keys]
+
+# Build dictionary of unique distances (unordered pairs)
+distances = {}
+for i, key1 in enumerate(all_white_keys):
+    for j, key2 in enumerate(all_white_keys):
+        if j > i:  # only keep unique pairs
+            distances[(key1, key2)] = abs(i - j)
+
+# Print dictionary
+for k, v in distances.items():
+    print(f"{k}: {v}")
+
 
 PROGRESS_BAR_HEIGHT = 12
 PROGRESS_BAR_MARGIN_TOP = 4
@@ -84,10 +129,15 @@ def build_white_keys(rect: pygame.Rect, n: int):
 	return keys
 
 def main():
-	pygame.init()
-	screen = pygame.display.set_mode((WIDTH, HEIGHT))
-	clock = pygame.time.Clock()
+	create_legend_image("legend.png")  # generate legend image
 
+	pygame.init()
+	LEGEND_WIDTH = 150
+	screen = pygame.display.set_mode((WIDTH + LEGEND_WIDTH, HEIGHT))
+	clock = pygame.time.Clock()
+	legend_img = pygame.image.load("legend.png")
+	legend_img = pygame.transform.scale(legend_img, (250, 175))  # width, height
+	legend_rect = legend_img.get_rect(topleft=(WIDTH - 110, MARGIN))
 	font = pygame.font.SysFont(None, 18)
 
 	
@@ -119,6 +169,7 @@ def main():
 			elaspedTime += dt
 		elaspedTime = min(max(elaspedTime, 0), total_duration)
 		screen.fill(BG_COLOR)
+
 		# Grabs the currently active chord notes based on hand index
 		# Determine which keys to highlight for the current event time window
 		i = hand.index
@@ -148,6 +199,7 @@ def main():
 				# If multiple notes start together, use blue; otherwise default single-note color
 				color = (120, 180, 255) if len(chord_highlights) > 1 else (255, 240, 160)
 				pygame.draw.rect(screen, color, r)
+
 			else:
 				pygame.draw.rect(screen, WHITE_KEY_COLOR, r)
 			pygame.draw.rect(screen, WHITE_KEY_OUTLINE, r, width=2)
@@ -170,7 +222,7 @@ def main():
 		screen.blit(elapsed_text, (bg_rect.centerx - elapsed_text.get_width()//2, bg_rect.centery - elapsed_text.get_height()//2))
 
 		hand.draw(screen)
-
+		screen.blit(legend_img, legend_rect)
 		pygame.display.flip()
 
 	pygame.quit()

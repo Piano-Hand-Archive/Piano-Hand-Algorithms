@@ -18,7 +18,7 @@ class Hand:
         self.rect = pygame.Rect(self.x, self.y, self.w, self.h)
 
         self.index = 0
-        self.fingerData = pd.read_csv('fingering_plan.csv')
+        self.fingerData = pd.read_csv('fingering_plan_updated.csv')
         self.start_times = self.fingerData['start_time'].tolist()
 
         thumb = self.fingerData['thumb_pos']
