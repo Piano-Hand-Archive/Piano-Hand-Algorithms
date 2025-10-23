@@ -119,29 +119,35 @@ def main():
 			elaspedTime += dt
 		elaspedTime = min(max(elaspedTime, 0), total_duration)
 		screen.fill(BG_COLOR)
-		# Determine which keys to highlight at the current event time
-		# Current event group (all notes that start at the same start_time)
-		current_start = hand.fingerData['start_time'].iloc[hand.index]
-		same_time_rows = hand.fingerData[hand.fingerData['start_time'] == current_start]
+		# Grabs the currently active chord notes based on hand index
+		# Determine which keys to highlight for the current event time window
+		i = hand.index
+		current_start = hand.start_times[i]
+		# Collect contiguous rows with the same start_time as the current index
+		indices = [i]
+		j = i - 1
+		while j >= 0 and hand.start_times[j] == current_start:
+			indices.append(j)
+			j -= 1
+		j = i + 1
+		while j < len(hand.start_times) and hand.start_times[j] == current_start:
+			indices.append(j)
+			j += 1
+		# Map these rows to white key indices
 		chord_highlights = set()
-		for _, row in same_time_rows.iterrows():
-			idx = note_name_to_white_index(str(row['key']))
-			if idx is not None:
-				chord_highlights.add(int(idx))
-		# Fallback: also include current thumb white index so single notes still show
-		thumb_scalar = hand.fingerData.loc[hand.index, 'thumb_pos']
-		try:
-			thumb_idx = int(float(f"{thumb_scalar}"))
-			chord_highlights.add(thumb_idx)
-		except Exception:
-			pass
+		for idx_row in indices:
+			note_name = str(hand.fingerData.at[idx_row, 'key'])
+			wi = note_name_to_white_index(note_name)
+			if wi is not None:
+				chord_highlights.add(int(wi))
 
 		# Draw white keys
 		for label, r in white_keys:
 			key_index = int(label)
 			if key_index in chord_highlights:
-				# Blue-ish highlight for active chord keys
-				pygame.draw.rect(screen, (120, 180, 255), r)
+				# If multiple notes start together, use blue; otherwise default single-note color
+				color = (120, 180, 255) if len(chord_highlights) > 1 else (255, 240, 160)
+				pygame.draw.rect(screen, color, r)
 			else:
 				pygame.draw.rect(screen, WHITE_KEY_COLOR, r)
 			pygame.draw.rect(screen, WHITE_KEY_OUTLINE, r, width=2)
