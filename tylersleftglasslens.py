@@ -3,6 +3,58 @@ import pygame
 from tylershand import Hand
 from piano_constants import *
 
+# --- Helpers: map note names like "C4" to white key indices (0..NUM_WHITE_KEYS-1) ---
+LETTER_TO_SEMITONE = {
+	'C': 0,
+	'D': 2,
+	'E': 4,
+	'F': 5,
+	'G': 7,
+	'A': 9,
+	'B': 11,
+}
+
+def _note_name_to_midi(note_name: str):
+	"""Return MIDI number for note like 'C4'. Returns None if accidental or invalid.
+
+	We intentionally skip accidentals (black keys) because our keyboard only draws white keys.
+	"""
+	if not note_name or len(note_name) < 2:
+		return None
+	letter = note_name[0].upper()
+	if letter not in LETTER_TO_SEMITONE:
+		return None
+	# If the second char is accidental, skip (we only support white keys here)
+	if len(note_name) >= 3 and note_name[1] in ('#', 'b'):
+		return None
+	try:
+		octave = int(note_name[-1])
+	except ValueError:
+		return None
+	semitone = LETTER_TO_SEMITONE[letter]
+	# MIDI mapping: C4 -> 60, so midi = 12 * (octave + 1) + semitone
+	return 12 * (octave + 1) + semitone
+
+def _midi_to_white_index(midi: int):
+	"""Map MIDI to white key index counting white keys from C0 upward.
+
+	Mirrors parser.midi_to_white_key_index but avoids importing music21.
+	Returns None if MIDI is a black key.
+	"""
+	if midi is None:
+		return None
+	offset = midi - 12
+	octave = offset // 12
+	note_in_octave = offset % 12
+	white_key_map = {0: 0, 2: 1, 4: 2, 5: 3, 7: 4, 9: 5, 11: 6}
+	if note_in_octave not in white_key_map:
+		return None
+	return octave * 7 + white_key_map[note_in_octave]
+
+def note_name_to_white_index(note_name: str):
+	midi = _note_name_to_midi(note_name)
+	return _midi_to_white_index(midi) if midi is not None else None
+
 PROGRESS_BAR_HEIGHT = 12
 PROGRESS_BAR_MARGIN_TOP = 4
 
@@ -67,15 +119,29 @@ def main():
 			elaspedTime += dt
 		elaspedTime = min(max(elaspedTime, 0), total_duration)
 		screen.fill(BG_COLOR)
-		# Determine which key to highlight based on current thumb position
+		# Determine which keys to highlight at the current event time
+		# Current event group (all notes that start at the same start_time)
+		current_start = hand.fingerData['start_time'].iloc[hand.index]
+		same_time_rows = hand.fingerData[hand.fingerData['start_time'] == current_start]
+		chord_highlights = set()
+		for _, row in same_time_rows.iterrows():
+			idx = note_name_to_white_index(str(row['key']))
+			if idx is not None:
+				chord_highlights.add(int(idx))
+		# Fallback: also include current thumb white index so single notes still show
 		thumb_scalar = hand.fingerData.loc[hand.index, 'thumb_pos']
-		highlight_idx = int(float(f"{thumb_scalar}"))
+		try:
+			thumb_idx = int(float(f"{thumb_scalar}"))
+			chord_highlights.add(thumb_idx)
+		except Exception:
+			pass
 
 		# Draw white keys
 		for label, r in white_keys:
 			key_index = int(label)
-			if key_index == highlight_idx:
-				pygame.draw.rect(screen, (255, 240, 160), r)
+			if key_index in chord_highlights:
+				# Blue-ish highlight for active chord keys
+				pygame.draw.rect(screen, (120, 180, 255), r)
 			else:
 				pygame.draw.rect(screen, WHITE_KEY_COLOR, r)
 			pygame.draw.rect(screen, WHITE_KEY_OUTLINE, r, width=2)
