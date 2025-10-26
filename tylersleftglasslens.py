@@ -4,8 +4,8 @@ import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 from tylershand import Hand
 from piano_constants import *
+from piano_sound import PianoSound, pre_init_audio
 
-# --- Helpers: map note names like "C4" to white key indices (0..NUM_WHITE_KEYS-1) ---
 LETTER_TO_SEMITONE = {
 	'C': 0,
 	'D': 2,
@@ -15,34 +15,16 @@ LETTER_TO_SEMITONE = {
 	'A': 9,
 	'B': 11,
 }
+HIGHLIGHT_COLOR = (1, 138/255, 138/255)
 
 def _note_name_to_midi(note_name: str):
-	"""Return MIDI number for note like 'C4'. Returns None if accidental or invalid.
-
-	We intentionally skip accidentals (black keys) because our keyboard only draws white keys.
-	"""
-	if not note_name or len(note_name) < 2:
-		return None
 	letter = note_name[0].upper()
-	if letter not in LETTER_TO_SEMITONE:
-		return None
-	# If the second char is accidental, skip (we only support white keys here)
-	if len(note_name) >= 3 and note_name[1] in ('#', 'b'):
-		return None
-	try:
-		octave = int(note_name[-1])
-	except ValueError:
-		return None
+	octave = int(note_name[-1])
 	semitone = LETTER_TO_SEMITONE[letter]
 	# MIDI mapping: C4 -> 60, so midi = 12 * (octave + 1) + semitone
 	return 12 * (octave + 1) + semitone
 
 def _midi_to_white_index(midi: int):
-	"""Map MIDI to white key index counting white keys from C0 upward.
-
-	Mirrors parser.midi_to_white_key_index but avoids importing music21.
-	Returns None if MIDI is a black key.
-	"""
 	if midi is None:
 		return None
 	offset = midi - 12
@@ -55,10 +37,10 @@ def _midi_to_white_index(midi: int):
 
 def note_name_to_white_index(note_name: str):
 	midi = _note_name_to_midi(note_name)
-	return _midi_to_white_index(midi) if midi is not None else None
+	return _midi_to_white_index(midi)
+
 def create_legend_image(filename="legend.png"):
     WHITE_KEY_COLOR = (1, 1, 1)
-    HIGHLIGHT_COLOR = (1, 138/255, 138/255)
     HAND_COLOR = (0, 1, 1)
 
     #white_patch = mpatches.Patch(facecolor=WHITE_KEY_COLOR, edgecolor='black', label='Idle Key')
@@ -131,6 +113,8 @@ def build_white_keys(rect: pygame.Rect, n: int):
 def main():
 	create_legend_image("legend.png")  # generate legend image
 
+	# Initialize audio mixer before pygame.init for low latency
+	pre_init_audio()
 	pygame.init()
 	LEGEND_WIDTH = 150
 	screen = pygame.display.set_mode((WIDTH + LEGEND_WIDTH, HEIGHT))
@@ -140,14 +124,19 @@ def main():
 	legend_rect = legend_img.get_rect(topleft=(WIDTH - 110, MARGIN))
 	font = pygame.font.SysFont(None, 18)
 
+	# Initialize simple tone synth
+	synth = PianoSound()
+
 	
 	white_keys = build_white_keys(kb_rect, NUM_WHITE_KEYS)
 
-	total_duration = hand.start_times[-1]
+	total_duration = hand.start_times[-1] + .5
 
 	elaspedTime = 0
 	running = True
 	pause = False
+	# Track last set of sounding notes (by note name)
+	last_chord_note_names = set()
 
 	while running:
 		dt = clock.tick(FPS) / 1000
@@ -162,6 +151,17 @@ def main():
 					elaspedTime += 1
 				elif event.key == pygame.K_SPACE:
 					pause = not pause
+					# Pause/resume all audio
+					if pause:
+						try:
+							pygame.mixer.pause()
+						except pygame.error:
+							pass
+					else:
+						try:
+							pygame.mixer.unpause()
+						except pygame.error:
+							pass
 
 		hand.play(elaspedTime)
 		# Update time only when not paused
@@ -184,22 +184,32 @@ def main():
 		while j < len(hand.start_times) and hand.start_times[j] == current_start:
 			indices.append(j)
 			j += 1
-		# Map these rows to white key indices
+		# Map these rows to white key indices and note names
 		chord_highlights = set()
+		chord_note_names = set()
 		for idx_row in indices:
 			note_name = str(hand.fingerData.at[idx_row, 'key'])
 			wi = note_name_to_white_index(note_name)
 			if wi is not None:
 				chord_highlights.add(int(wi))
+				chord_note_names.add(note_name)
 
+		# Update audio (start/stop notes as needed)
+		if not pause and elaspedTime < total_duration and chord_note_names != last_chord_note_names:
+			synth.set_active_notes(chord_note_names)
+			last_chord_note_names = chord_note_names.copy()
+		if elaspedTime >= total_duration:
+			synth.stop_all()
+			last_chord_note_names = set()
 		# Draw white keys
-		for label, r in white_keys:
+		hasDrawnAWhite = False
+		for i, (label, r) in enumerate(white_keys):
 			key_index = int(label)
 			if key_index in chord_highlights:
-				# If multiple notes start together, use blue; otherwise default single-note color
-				color = (120, 180, 255) if len(chord_highlights) > 1 else (255, 240, 160)
-				pygame.draw.rect(screen, color, r)
-
+				# If multiple notes start together, use blue, otherwise default single-note color
+				fill_color = (200, 100, 100) if (len(chord_highlights) > 1 and not hasDrawnAWhite) else (120, 180, 255) 
+				pygame.draw.rect(screen, fill_color, r)
+				hasDrawnAWhite = True
 			else:
 				pygame.draw.rect(screen, WHITE_KEY_COLOR, r)
 			pygame.draw.rect(screen, WHITE_KEY_OUTLINE, r, width=2)
@@ -225,6 +235,10 @@ def main():
 		screen.blit(legend_img, legend_rect)
 		pygame.display.flip()
 
+	try:
+		synth.stop_all()
+	except Exception:
+		pass
 	pygame.quit()
 	return 0
 

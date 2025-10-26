@@ -53,8 +53,9 @@ class Hand:
 
     def draw(self, surface: pygame.Surface) -> None:
         # minimal draw: single ellipse with outline
-        pygame.draw.ellipse(surface, self.color, self.rect)
-        pygame.draw.ellipse(surface, (0, 0, 0), self.rect, width=2)
+        pass
+        #pygame.draw.ellipse(surface, self.color, self.rect)
+        #pygame.draw.ellipse(surface, (0, 0, 0), self.rect, width=2)
 
     @property
     def position(self):
