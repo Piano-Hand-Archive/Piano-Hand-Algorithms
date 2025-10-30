@@ -121,7 +121,7 @@ def save_timed_steps_csv(note_info, timed_steps, output_dir="."):
     csv_path = os.path.join(output_dir, "timed_steps.csv")
     with open(csv_path, "w", newline="") as f:
         writer = csv.writer(f)
-        writer.writerow(["start_time", "key", "midi", "duration", "white_key_index"])
+        writer.writerow(["start_time", "key", "midi", "duration", "white_key_index", "hand"])
         note_counter = 0
         for start_time, step in timed_steps:
             for i, (midi, duration, white_key_index) in enumerate(step):
@@ -133,7 +133,7 @@ def save_timed_steps_csv(note_info, timed_steps, output_dir="."):
                     key_name = f"{note_entry['pitches'][i][0]}{note_entry['pitches'][i][1]}"
                     if i == len(note_entry['pitches']) - 1:
                         note_counter += 1
-                writer.writerow([start_time, key_name, midi, duration, white_key_index])
+                writer.writerow([start_time, key_name, midi, duration, white_key_index, note_entry.get("hand", "R")])
     print(f"\nSaved absolute timed steps CSV to: {csv_path}")
 
 

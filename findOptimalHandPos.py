@@ -103,3 +103,133 @@ def main():
 
 if __name__ == '__main__':
     main()
+
+# --- 5. Computes RH costs ---  
+
+def compute_rh_cost(notes):
+    if not notes: # If song is empty, return nothing.
+        return [], 0, 0 
+    
+    notes = sorted(notes, key=lambda n: (n['start_time'], n['white_key_index']))
+
+    def get_possible_states(note): # gives all possiblel thumb positions
+        wki = note['white_key_index']
+        return [wki - (f - 1) for f in range(1, 6)]
+
+    def cost(prev, curr): # measures thumb movement between positions
+        return abs(prev - curr)
+
+    dp = [{} for _ in notes]  # dp tables
+    back = [{} for _ in notes]
+
+    for s in get_possible_states(notes[0]): # start with first note
+        dp[0][s] = 0
+
+    for i in range(1, len(notes)): # finds best thumb path
+        for s in get_possible_states(notes[i]):
+            best_cost = float("inf")
+            best_prev = None
+            for ps, pcost in dp[i - 1].items():
+                move = pcost + cost(ps, s)
+                if move < best_cost:
+                    best_cost = move
+                    best_prev = ps
+            if best_prev is not None:
+                dp[i][s] = best_cost
+                back[i][s] = best_prev
+
+    if not dp[-1]: # 
+        return [], 0, 0
+
+    end = min(dp[-1], key=dp[-1].get) # Backtracks to get path
+    path = [end]
+    for i in range(len(notes) - 1, 0, -1):
+        end = back[i][end]
+        path.insert(0, end)
+
+    jumps = [abs(path[i] - path[i - 1]) for i in range(1, len(path))] # Returns: thumb_path, total_shift, max_jump = compute_rh_cost(notes)
+    return path, sum(jumps) if jumps else 0, max(jumps) if jumps else 0
+
+# --- 6. Left-hand Implemention ---  
+
+def try_assign_left_hand(candidate_note, rh_notes, lh_notes):
+    # gets RH for every note
+    _, baseline_shift, _ = compute_rh_cost(rh_notes)
+
+    # run note with LH 
+    filtered_rh = [
+        n for n in rh_notes
+        if not (
+            n['start_time'] == candidate_note['start_time']
+            and n['white_key_index'] == candidate_note['white_key_index']
+        )
+    ]
+
+    # re-run RH cost without that note
+    _, after_shift, _ = compute_rh_cost(filtered_rh)
+
+    # assign to LH if shifts lower
+    if after_shift < baseline_shift:
+        # add note to LH list
+        lh_notes.append(candidate_note)
+        return True
+
+    # else: keep RH
+    return False
+
+def assign_hands(notes):
+    rh_notes = notes.copy()
+    lh_notes = []
+    for note in notes:
+        wki = note['white_key_index']
+
+        # Rule 1: below middle C → automatic LH
+        if wki <= 23:
+            lh_notes.append(note)
+            continue
+
+        # Rule 2: if RH movement >= 5 → test LH
+        _, _, max_jump = compute_rh_cost(rh_notes)
+        if max_jump >= 5:
+            try_assign_left_hand(note, rh_notes, lh_notes)
+
+    # assigns final hand positions
+    for note in notes:
+        if note in lh_notes:
+            note['hand'] = 'L'
+        else:
+            note['hand'] = 'R'
+
+    return notes
+
+# --- 7. Save Assigned Hands to CSV ---
+
+def save_hand_assignments_to_csv(notes, filename="fingering_plan.csv"):
+    with open(filename, "w", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(["start_time", "key", "midi", "duration", "white_key_index", "hand"])
+        for note in notes:
+            writer.writerow([
+                note.get("start_time", ""),
+                note.get("key", ""),
+                note.get("midi", ""),
+                note.get("duration", ""),
+                note.get("white_key_index", ""),
+                note.get("hand", "R")  # Default to R if not assigned
+            ])
+    print(f"Saved L/R hand assignments to {filename}")
+
+
+# --- 8. Run Left-Hand Assignment Only ---
+def main_hand_assignment():
+    notes = load_notes_from_csv("timed_steps.csv")
+    if not notes:
+        print("No notes were loaded.")
+        return
+
+    assigned_notes = assign_hands(notes)
+    save_hand_assignments_to_csv(assigned_notes)
+
+if __name__ == "__main__":
+    main_hand_assignment()
+
