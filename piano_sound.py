@@ -62,9 +62,17 @@ class PianoSound:
 
     def set_active_notes(self, note_names) -> None:
         """Start/stop notes to match the provided set of note names."""
-        to_stop = [n for n in self._active_notes.keys() if n not in note_names]
-        for n in to_stop:
-            ch = self._active_notes.pop(n, None)
+        # Convert note names to MIDI values for internal tracking
+        target_midi_set = set()
+        for n in note_names:
+            midi = _note_name_to_midi(n)
+            if midi is not None:
+                target_midi_set.add(midi)
+        
+        # Stop notes that are no longer active
+        to_stop = [midi for midi in self._active_notes.keys() if midi not in target_midi_set]
+        for midi in to_stop:
+            ch = self._active_notes.pop(midi, None)
             if ch:
                 try:
                     ch.fadeout(FADE_OUT_MS)
@@ -73,18 +81,46 @@ class PianoSound:
 
         # Start any new notes
         for n in note_names:
-            if n in self._active_notes:
-                continue
             midi = _note_name_to_midi(n)
             if midi is None:
                 continue  # skip accidentals or invalid
+            if midi in self._active_notes:
+                continue
             snd = self._sound_for_midi(midi)
             if snd is None:
                 continue
             ch = pygame.mixer.find_channel(True)  # force allocate if none are free
             if ch is not None:
                 ch.play(snd, loops=-1, fade_ms=FADE_IN_MS)
-                self._active_notes[n] = ch
+                self._active_notes[midi] = ch
+
+    def set_active_notes_from_midi(self, midi_values) -> None:
+        """Start/stop notes to match the provided set of MIDI values."""
+        # Convert MIDI values to a set for comparison
+        midi_set = set(midi_values)
+        # Stop notes that are no longer active (track by MIDI value)
+        to_stop = [midi for midi in self._active_notes.keys() if midi not in midi_set]
+        for midi in to_stop:
+            ch = self._active_notes.pop(midi, None)
+            if ch:
+                try:
+                    ch.fadeout(FADE_OUT_MS)
+                except pygame.error:
+                    ch.stop()
+
+        # Start any new notes
+        for midi in midi_values:
+            if midi in self._active_notes:
+                continue
+            if midi is None:
+                continue  # skip invalid MIDI
+            snd = self._sound_for_midi(midi)
+            if snd is None:
+                continue
+            ch = pygame.mixer.find_channel(True)  # force allocate if none are free
+            if ch is not None:
+                ch.play(snd, loops=-1, fade_ms=FADE_IN_MS)
+                self._active_notes[midi] = ch
 
     def stop_all(self):
         for ch in self._active_notes.values():

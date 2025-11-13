@@ -1,10 +1,13 @@
 import sys
+from collections import defaultdict
+from typing import List
+
+import pandas as pd
 import pygame
-import matplotlib.pyplot as plt
-import matplotlib.patches as mpatches
 from tylershand import Hand
 from piano_constants import *
 from piano_sound import PianoSound, pre_init_audio
+from tylermusicutils import build_white_keys, build_black_keys, create_legend_image
 
 LETTER_TO_SEMITONE = {
 	'C': 0,
@@ -15,53 +18,7 @@ LETTER_TO_SEMITONE = {
 	'A': 9,
 	'B': 11,
 }
-HIGHLIGHT_COLOR = (1, 138/255, 138/255)
 
-def _note_name_to_midi(note_name: str):
-	letter = note_name[0].upper()
-	octave = int(note_name[-1])
-	semitone = LETTER_TO_SEMITONE[letter]
-	# MIDI mapping: C4 -> 60, so midi = 12 * (octave + 1) + semitone
-	return 12 * (octave + 1) + semitone
-
-def _midi_to_white_index(midi: int):
-	if midi is None:
-		return None
-	offset = midi - 12
-	octave = offset // 12
-	note_in_octave = offset % 12
-	white_key_map = {0: 0, 2: 1, 4: 2, 5: 3, 7: 4, 9: 5, 11: 6}
-	if note_in_octave not in white_key_map:
-		return None
-	return octave * 7 + white_key_map[note_in_octave]
-
-def note_name_to_white_index(note_name: str):
-	midi = _note_name_to_midi(note_name)
-	return _midi_to_white_index(midi)
-
-def create_legend_image(filename="legend.png"):
-    WHITE_KEY_COLOR = (1, 1, 1)
-    HAND_COLOR = (0, 1, 1)
-
-    #white_patch = mpatches.Patch(facecolor=WHITE_KEY_COLOR, edgecolor='black', label='Idle Key')
-    highlight_patch = mpatches.Patch(facecolor=HIGHLIGHT_COLOR, edgecolor='black', label='Key Played by Thumb')
-    hand_patch = mpatches.Patch(facecolor=HAND_COLOR, edgecolor='black', label='Hand Position')
-
-    fig, ax = plt.subplots(figsize=(3, 2))
-
-    # Place the legend to the right
-    ax.legend(
-        handles=[highlight_patch, hand_patch],
-        loc='center left',
-        bbox_to_anchor=(1, 0.5),
-        frameon=True,
-        title="Visualizer Legend"
-    )
-
-    ax.axis('off')
-    plt.tight_layout()
-    plt.savefig(filename, dpi=150, bbox_inches='tight', transparent=True)
-    plt.close()
 
 #dictionary of key pair:distance
 white_keys = ["C", "D", "E", "F", "G", "A", "B"]
@@ -81,34 +38,19 @@ for i, key1 in enumerate(all_white_keys):
 for k, v in distances.items():
     print(f"{k}: {v}")
 
+def note_color_for_hands(hand_ids, default_color):
+	if not hand_ids:
+		return default_color
+	if len(hand_ids) == 1:
+		hand_id = next(iter(hand_ids))
+		return HAND_NOTE_COLORS.get(hand_id, UNKNOWN_HAND_NOTE_COLOR)
+	return MIXED_NOTE_COLOR
 
-PROGRESS_BAR_HEIGHT = 12
-PROGRESS_BAR_MARGIN_TOP = 4
 
-BG_COLOR = (255, 255, 255)
-WHITE_KEY_COLOR = (255, 255, 255)
-WHITE_KEY_OUTLINE = (0, 0, 0)
-LABEL_COLOR = (0, 0, 0)
-
-kb_height = HEIGHT - 2 * MARGIN - PROGRESS_BAR_HEIGHT - PROGRESS_BAR_MARGIN_TOP
-kb_rect = pygame.Rect(MARGIN, MARGIN, WIDTH - 2 * MARGIN, kb_height)
-hand = Hand(position=(kb_rect.x + 10, kb_rect.y + 10), size=(WIDTH//NUM_WHITE_KEYS*5, 100))
-
-# Progress bar 
-bar_width = kb_rect.width
-bar_x = kb_rect.x
-bar_y = kb_rect.bottom + PROGRESS_BAR_MARGIN_TOP
-bg_rect = pygame.Rect(bar_x, bar_y, bar_width, PROGRESS_BAR_HEIGHT)
-fill_rect = pygame.Rect(bar_x, bar_y, 0, PROGRESS_BAR_HEIGHT)
-
-def build_white_keys(rect: pygame.Rect, n: int):
-	keys = []
-	key_w = rect.width // n
-	for i in range(n):
-		label = str(i)
-		r = pygame.Rect(rect.x + i * key_w, rect.y, key_w, rect.height)
-		keys.append((label, r))
-	return keys
+def blit_thumb_overlay(surface, rect):
+	overlay = pygame.Surface((rect.width, rect.height), pygame.SRCALPHA)
+	overlay.fill((THUMB_HIGHLIGHT_COLOR[0], THUMB_HIGHLIGHT_COLOR[1], THUMB_HIGHLIGHT_COLOR[2], THUMB_OVERLAY_ALPHA))
+	surface.blit(overlay, rect)
 
 def main():
 	create_legend_image("legend.png")  # generate legend image
@@ -127,16 +69,35 @@ def main():
 	# Initialize simple tone synth
 	synth = PianoSound()
 
-	
+	kb_height = HEIGHT - 2 * MARGIN - PROGRESS_BAR_HEIGHT - PROGRESS_BAR_MARGIN_TOP
+	kb_rect = pygame.Rect(MARGIN, MARGIN, WIDTH - 2 * MARGIN, kb_height)
 	white_keys = build_white_keys(kb_rect, NUM_WHITE_KEYS)
+	white_key_width = kb_rect.width / NUM_WHITE_KEYS
+	black_keys = build_black_keys(white_keys, white_key_width, kb_rect.x, kb_rect)
 
-	total_duration = hand.start_times[-1] + .5
+	bar_width = kb_rect.width
+	bar_x = kb_rect.x
+	bar_y = kb_rect.bottom + PROGRESS_BAR_MARGIN_TOP
+	bg_rect = pygame.Rect(bar_x, bar_y, bar_width, PROGRESS_BAR_HEIGHT)
+	fill_rect = pygame.Rect(bar_x, bar_y, 0, PROGRESS_BAR_HEIGHT)
+
+	finger_df = pd.read_csv('fingering_plan_updated.csv')
+	total_duration = float(finger_df['start_time'].max()) + 0.5
+
+	hand_width = max((kb_rect.width // NUM_WHITE_KEYS) * 5, 60)
+	hand_height = 100
+	base_x = kb_rect.x + 10
+	right_y = kb_rect.y + 10
+	left_y = right_y + hand_height // 2
+	hands = []
+	for hand_label, color, y in (('L', LEFT_HAND_COLOR, left_y), ('R', RIGHT_HAND_COLOR, right_y)):
+		hands.append(Hand(position=(base_x, y), size=(hand_width, hand_height), color=color, alpha=HAND_ALPHA, hand_label=hand_label, finger_data=finger_df))
 
 	elaspedTime = 0
 	running = True
 	pause = False
-	# Track last set of sounding notes (by note name)
-	last_chord_note_names = set()
+	# Track last set of sounding notes (by MIDI value)
+	last_chord_midi_values = set()
 
 	while running:
 		dt = clock.tick(FPS) / 1000
@@ -163,61 +124,89 @@ def main():
 						except pygame.error:
 							pass
 
-		hand.play(elaspedTime)
+		for hand_obj in hands:
+			hand_obj.play(elaspedTime)
 		# Update time only when not paused
 		if not pause:
 			elaspedTime += dt
 		elaspedTime = min(max(elaspedTime, 0), total_duration)
 		screen.fill(BG_COLOR)
 
-		# Grabs the currently active chord notes based on hand index
-		# Determine which keys to highlight for the current event time window
-		i = hand.index
-		current_start = hand.start_times[i]
-		# Collect contiguous rows with the same start_time as the current index
-		indices = [i]
-		j = i - 1
-		while j >= 0 and hand.start_times[j] == current_start:
-			indices.append(j)
-			j -= 1
-		j = i + 1
-		while j < len(hand.start_times) and hand.start_times[j] == current_start:
-			indices.append(j)
-			j += 1
-		# Map these rows to white key indices and note names
-		chord_highlights = set()
-		chord_note_names = set()
-		for idx_row in indices:
-			note_name = str(hand.fingerData.at[idx_row, 'key'])
-			wi = note_name_to_white_index(note_name)
-			if wi is not None:
-				chord_highlights.add(int(wi))
-				chord_note_names.add(note_name)
+		# Determine which keys to highlight for the current event time window across hands
+		white_key_highlights = defaultdict(set)
+		midi_highlights = defaultdict(set)
+		thumb_highlights = defaultdict(set)
+		for hand_obj in hands:
+			hand_df = hand_obj.fingerData
+			if hand_df.empty:
+				continue
+			current_idx = min(max(hand_obj.index, 0), len(hand_df) - 1)
+			hand_id = (hand_obj.hand_label or 'UNK').upper()
+
+			if 'thumb_pos' in hand_df.columns:
+				thumb_value = pd.to_numeric(hand_df.iloc[current_idx]['thumb_pos'], errors='coerce')
+				if pd.notna(thumb_value):
+					thumb_highlights[int(thumb_value)].add(hand_id)
+
+			if not hand_obj.start_times:
+				continue
+
+			if 'note_time' in hand_df.columns:
+				note_time_series = hand_df['note_time']
+			else:
+				note_time_series = pd.Series(0.0, index=hand_df.index)
+			if 'note_end_time' in hand_df.columns:
+				note_end_series = hand_df['note_end_time']
+			else:
+				note_end_series = hand_df['start_time'] + note_time_series
+
+			active_mask = (hand_df['start_time'] <= elaspedTime) & (note_end_series > elaspedTime)
+			if not active_mask.any():
+				continue
+			active_rows = hand_df.loc[active_mask]
+			for _, row in active_rows.iterrows():
+				wi = row.get('white_key_index')
+				if pd.notna(wi):
+					white_key_highlights[int(wi)].add(hand_id)
+				midi = row.get('midi')
+				if pd.notna(midi):
+					midi_highlights[int(midi)].add(hand_id)
+
+		chord_midi_values = set(midi_highlights.keys())
 
 		# Update audio (start/stop notes as needed)
-		if not pause and elaspedTime < total_duration and chord_note_names != last_chord_note_names:
-			synth.set_active_notes(chord_note_names)
-			last_chord_note_names = chord_note_names.copy()
+		if not pause and elaspedTime < total_duration and chord_midi_values != last_chord_midi_values:
+			synth.set_active_notes_from_midi(chord_midi_values)
+			last_chord_midi_values = chord_midi_values.copy()
 		if elaspedTime >= total_duration:
 			synth.stop_all()
-			last_chord_note_names = set()
+			last_chord_midi_values = set()
 		# Draw white keys
-		hasDrawnAWhite = False
-		for i, (label, r) in enumerate(white_keys):
+		for label, r in white_keys:
 			key_index = int(label)
-			if key_index in chord_highlights:
-				# If multiple notes start together, use blue, otherwise default single-note color
-				fill_color = (200, 100, 100) if (len(chord_highlights) > 1 and not hasDrawnAWhite) else (120, 180, 255) 
-				pygame.draw.rect(screen, fill_color, r)
-				hasDrawnAWhite = True
-			else:
-				pygame.draw.rect(screen, WHITE_KEY_COLOR, r)
+			fill_color = note_color_for_hands(
+				white_key_highlights.get(key_index),
+				WHITE_KEY_COLOR
+			)
+			pygame.draw.rect(screen, fill_color, r)
+			if key_index in thumb_highlights:
+				blit_thumb_overlay(screen, r)
 			pygame.draw.rect(screen, WHITE_KEY_OUTLINE, r, width=2)
 			text = font.render(label, True, LABEL_COLOR)
 			screen.blit(text, (r.centerx - text.get_width()/2, r.bottom - text.get_height()))
+		
+		# Draw black keys (on top of white keys)
+		for midi_val, r in black_keys:
+			fill_color = note_color_for_hands(
+				midi_highlights.get(midi_val),
+				BLACK_KEY_COLOR
+			)
+			pygame.draw.rect(screen, fill_color, r)
+			pygame.draw.rect(screen, BLACK_KEY_OUTLINE, r, width=1)
 
 		# Progress bar calculations
-		progress = max(0, min(1, elaspedTime / total_duration))
+		progress_base = total_duration if total_duration > 0 else 1
+		progress = max(0, min(1, elaspedTime / progress_base))
 		fill_rect.size = (int(bar_width * progress), PROGRESS_BAR_HEIGHT)
 		# Draw background and fill
 		pygame.draw.rect(screen, (255, 255, 255), bg_rect)
@@ -231,7 +220,8 @@ def main():
 		elapsed_text = font.render(f"{elaspedTime:.1f}s / {total_duration:.1f}s", True, (40, 40, 40))
 		screen.blit(elapsed_text, (bg_rect.centerx - elapsed_text.get_width()//2, bg_rect.centery - elapsed_text.get_height()//2))
 
-		hand.draw(screen)
+		for hand_obj in hands:
+			hand_obj.draw(screen)
 		screen.blit(legend_img, legend_rect)
 		pygame.display.flip()
 
