@@ -22,7 +22,16 @@ def get_possible_states(note):
     return [wki - (f - 1) for f in range(1, 6)]
 
 def calculate_transition_cost(prev_thumb_pos, curr_thumb_pos):
-    return abs(curr_thumb_pos - prev_thumb_pos)
+    prev_midi = white_index_to_midi(prev_thumb_pos)
+    curr_midi = white_index_to_midi(curr_thumb_pos)
+    return abs(curr_midi - prev_midi)
+
+WHITE_TO_NOTE = {0: 0, 1: 2, 2: 4, 3: 5, 4: 7, 5: 9, 6: 11}
+def white_index_to_midi(wki):
+    octave = wki // 7
+    pos = wki % 7
+    note_in_octave = WHITE_TO_NOTE[pos]
+    return 12 + octave * 12 + note_in_octave
 
 # --- 3. Main Algorithm Implementation ---
 def find_optimal_fingering(notes):
@@ -116,8 +125,10 @@ def compute_rh_cost(notes):
         wki = note['white_key_index']
         return [wki - (f - 1) for f in range(1, 6)]
 
-    def cost(prev, curr): # measures thumb movement between positions
-        return abs(prev - curr)
+    def cost(prev, curr): # measures thumb movement between positions 
+        prev_midi = white_index_to_midi(prev)
+        curr_midi = white_index_to_midi(curr)
+        return abs(prev_midi - curr_midi)
 
     dp = [{} for _ in notes]  # dp tables
     back = [{} for _ in notes]
@@ -190,7 +201,7 @@ def assign_hands(notes):
 
         # Rule 2: if RH movement >= 5 → test LH
         _, _, max_jump = compute_rh_cost(rh_notes)
-        if max_jump >= 5:
+        if max_jump >= 8:
             try_assign_left_hand(note, rh_notes, lh_notes)
 
     # assigns final hand positions
