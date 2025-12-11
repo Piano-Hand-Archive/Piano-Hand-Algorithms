@@ -1,7 +1,126 @@
 import csv
 import os
+from music21 import *
 
+# ==========================================
+# CONFIGURATION
+# ==========================================
+
+# Penalty added to cost if the hand moves at all.
+# Higher = Hand stays planted more (less shifting). Lower = Hand glides more.
 MOVE_PENALTY = 4
+
+# Input MusicXML File
+INPUT_MUSIC_XML = 'happybirthday.musicxml'
+
+# ==========================================
+# PART 1: MUSICXML PARSER
+# ==========================================
+
+def midi_to_white_key_index(midi):
+    offset = midi - 12
+    octave = offset // 12
+    note_in_octave = offset % 12
+    white_key_map = {0: 0, 2: 1, 4: 2, 5: 3, 7: 4, 9: 5, 11: 6}
+    if note_in_octave not in white_key_map:
+        return None
+    return octave * 7 + white_key_map[note_in_octave]
+
+
+def parse_musicxml(file):
+    score = converter.parse(file)
+    note_info = []
+
+    for part in score.parts:
+        for music_element in part.flatten().notesAndRests:
+            if isinstance(music_element, note.Rest):
+                continue
+
+            if isinstance(music_element, note.Note):
+                if music_element.pitch.alter != 0:
+                    continue
+                info = {
+                    'type': 'note',
+                    'pitch': (music_element.pitch.step,
+                              music_element.pitch.octave,
+                              music_element.pitch.alter,
+                              music_element.pitch.midi),
+                    'duration': music_element.quarterLength,
+                    'white_key_index': midi_to_white_key_index(music_element.pitch.midi),
+                    'offset': music_element.offset
+                }
+                note_info.append(info)
+
+            elif isinstance(music_element, chord.Chord):
+                white_notes = [n for n in music_element.notes if n.pitch.alter == 0]
+                if white_notes:
+                    info = {
+                        'type': 'chord',
+                        'pitches': [(n.pitch.step,
+                                     n.pitch.octave,
+                                     n.pitch.alter,
+                                     n.pitch.midi)
+                                    for n in white_notes],
+                        'duration': music_element.quarterLength,
+                        'white_key_indices': [midi_to_white_key_index(n.pitch.midi) for n in white_notes],
+                        'offset': music_element.offset
+                    }
+                    note_info.append(info)
+
+    note_info.sort(key=lambda x: x['offset'])
+    return note_info
+
+
+def convert_to_time_steps(note_info):
+    time_steps = []
+    for n in note_info:
+        time_step = []
+        if n['type'] == 'chord':
+            for i, pitch in enumerate(n['pitches']):
+                time_step.append((pitch[3], n['duration'], n['white_key_indices'][i]))
+        else:
+            time_step.append((n['pitch'][3], n['duration'], n['white_key_index']))
+        time_steps.append(time_step)
+    return time_steps
+
+
+def convert_to_timed_steps(note_info):
+    timed_steps = []
+    for n in note_info:
+        time_step = []
+        if n['type'] == 'chord':
+            for i, pitch in enumerate(n['pitches']):
+                time_step.append((pitch[3], n['duration'], n['white_key_indices'][i]))
+        else:
+            time_step.append((n['pitch'][3], n['duration'], n['white_key_index']))
+        timed_steps.append((n['offset'], time_step))
+    return timed_steps
+
+
+def save_timed_steps_csv(note_info, timed_steps, output_dir="."):
+    os.makedirs(output_dir, exist_ok=True)
+    csv_path = os.path.join(output_dir, "timed_steps.csv")
+    with open(csv_path, "w", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(["start_time", "key", "midi", "duration", "white_key_index"])
+        note_counter = 0
+        for start_time, step in timed_steps:
+            for i, (midi, duration, white_key_index) in enumerate(step):
+                # Guard against index errors if counts mismatch slightly
+                if note_counter < len(note_info):
+                    note_entry = note_info[note_counter]
+                    if note_entry['type'] == 'note':
+                        key_name = f"{note_entry['pitch'][0]}{note_entry['pitch'][1]}"
+                        note_counter += 1
+                    else:
+                        key_name = f"{note_entry['pitches'][i][0]}{note_entry['pitches'][i][1]}"
+                        if i == len(note_entry['pitches']) - 1:
+                            note_counter += 1
+                    writer.writerow([start_time, key_name, midi, duration, white_key_index])
+
+# ==========================================
+# PART 2: FINGERING OPTIMIZER
+# ==========================================
 
 def load_notes_grouped_by_time(filename="timed_steps.csv"):
     notes_by_time = []
@@ -65,6 +184,8 @@ def find_optimal_split_point(note_groups, min_gap=6):
 
     valid_splits = []
 
+    print(f"Simulating split scenarios between {index_to_note_name(min_note)} and {index_to_note_name(max_note)}...")
+
     for split in range(min_note, max_note + 1):
         can_complete = True
         total_collisions = 0
@@ -91,10 +212,13 @@ def find_optimal_split_point(note_groups, min_gap=6):
             })
 
     if not valid_splits:
+        print("Error: No valid split point found.")
         return None
 
     min_collisions = min(s['collisions'] for s in valid_splits)
     candidates = [s for s in valid_splits if s['collisions'] == min_collisions]
+
+    print(f"Found {len(candidates)} valid split points. Running full movement simulation...")
 
     best_split_index = None
     min_total_movement_cost = float('inf')
@@ -120,8 +244,10 @@ def find_optimal_split_point(note_groups, min_gap=6):
             best_split_index = split
 
     if best_split_index is not None:
+        print(f"Optimal split selected: {index_to_note_name(best_split_index)} (Score: {min_total_movement_cost})")
         return best_split_index
     else:
+        print("Simulation failed to find a playable path for any split. Using fallback.")
         return candidates[0]['split']
 
 
@@ -379,7 +505,7 @@ def save_summary_csv(left_path, right_path, left_groups, right_groups, split_poi
         writer.writerow(['Split Point', index_to_note_name(split_point), split_point, ''])
         writer.writerow(['Position Changes', left_moves, right_moves, left_moves + right_moves])
         writer.writerow(['Max Position', index_to_note_name(left_max), index_to_note_name(right_min),
-                         f"Gap: {right_min - left_max}"])
+                         f"Gap: {right_min - left_max} keys"])
 
 
 def save_fingering_plan_csv(note_groups, left_path, right_path, left_groups, right_groups, output_dir="."):
@@ -408,28 +534,55 @@ def save_fingering_plan_csv(note_groups, left_path, right_path, left_groups, rig
 
 
 def main():
-    note_groups = load_notes_grouped_by_time("timed_steps.csv")
-    if not note_groups:
+    # ==========================
+    # STEP 1: PARSE MUSICXML
+    # ==========================
+    if not os.path.exists(INPUT_MUSIC_XML):
+        print(f"Error: {INPUT_MUSIC_XML} not found.")
         return
 
+    print(f"Parsing {INPUT_MUSIC_XML}...")
+    note_info = parse_musicxml(INPUT_MUSIC_XML)
+    timed_steps = convert_to_timed_steps(note_info)
+
+    output_dir = os.path.dirname(os.path.abspath(__file__))
+    save_timed_steps_csv(note_info, timed_steps, output_dir)
+    print("  -> timed_steps.csv generated.")
+
+    # ==========================
+    # STEP 2: RUN OPTIMIZER
+    # ==========================
+    print("Loading notes for optimization...")
+    note_groups = load_notes_grouped_by_time("timed_steps.csv")
+    if not note_groups:
+        print("Error: No notes loaded.")
+        return
+
+    print("Finding optimal split point...")
     optimal_split = find_optimal_split_point(note_groups, min_gap=6)
 
     if optimal_split is None:
+        print("Optimization failed: Could not find valid split point.")
         return
 
+    print("Running global path optimization...")
     result = global_optimization(note_groups, optimal_split, min_gap=6)
 
     if result[0] is None:
+        print("Optimization failed during path generation.")
         return
 
     left_path, right_path, split_point, left_groups, right_groups = result
 
+    # Generate Commands with fixed starting positions (Parked)
     left_commands = generate_servo_commands(left_path, left_groups, "Left", "G1")
     right_commands = generate_servo_commands(right_path, right_groups, "Right", "F7")
 
+    print("Saving output files...")
     save_servo_files(left_commands, right_commands)
     save_summary_csv(left_path, right_path, left_groups, right_groups, split_point)
     save_fingering_plan_csv(note_groups, left_path, right_path, left_groups, right_groups)
+    print(f"Optimization Complete. Split Point: {index_to_note_name(optimal_split)}")
 
 
 if __name__ == '__main__':

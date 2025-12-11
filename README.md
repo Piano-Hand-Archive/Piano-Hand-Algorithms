@@ -1,17 +1,24 @@
-Yes, you can absolutely copy and paste the content below directly into a file named `README.md`. It is already formatted with valid Markdown syntax.
+Yes, based on the code provided, the hands are explicitly configured to start at the far ends of the piano in a "parked" position.
 
-Here is the block again for easy copying:
+  * **Left Hand:** Starts at **G1** (Low/Bass end).
+  * **Right Hand:** Starts at **F7** (High/Treble end).
+
+This ensures the hands are completely out of the way before the song begins.
+
+-----
+
+Here is the complete `README.md` file content you can copy and paste directly:
 
 ````markdown
 # Robotic Piano Fingering Optimizer
 
-This Python utility generates optimal fingering plans and servo commands for a pair of robotic piano hands. It uses a simulation-based approach with the Viterbi algorithm to guarantee **completeness** (all notes played), **physical feasibility** (5-key span limit), and **minimal hand movement** (stability).
+This Python utility generates optimal fingering plans and servo commands for a pair of robotic piano hands. It transforms raw musical data into specific robotic movements, using a simulation-based approach with the Viterbi algorithm. The goal is to guarantee **completeness** (all notes played), **physical feasibility** (5-key span limit), and **minimal hand movement** (stability).
 
 ## Key Features
 
 * **Global Movement Minimization:** Uses a cost-based Viterbi algorithm to find the absolute most efficient path for thumb positions, minimizing total hand shifts across the entire song.
-* **Hysteresis (Stability) Control:** Implements a `MOVE_PENALTY` that prioritizes keeping the hand "planted" in one position over making small, unnecessary adjustments. This eliminates "robotic drift."
-* **Simulation-Based Split Point:** Instead of guessing, the algorithm simulates playing the entire song for *every possible* split point and selects the one that results in the lowest global movement cost.
+* **Hysteresis (Stability) Control:** Implements a configurable `MOVE_PENALTY` that prioritizes keeping the hand "planted" in one position over making small, unnecessary adjustments. This eliminates "robotic drift."
+* **Simulation-Based Split Point:** Instead of guessing, the algorithm simulates playing the entire song for *every possible* split point (dividing line between hands) and selects the one that results in the lowest global movement cost.
 * **Strict Collision Prevention:** Defines a hard "No Fly Zone" (Gap) between hands based on the optimal split point, mathematically guaranteeing that hands never cross over or collide.
 * **Physical Constraints:** Enforces a strict 5-key maximum span (Thumb to Pinky) for all chords and note reaches.
 
@@ -22,7 +29,8 @@ This Python utility generates optimal fingering plans and servo commands for a p
 
 ## Input Data
 
-The script requires a CSV file named `timed_steps.csv` in the same directory.
+The script requires a CSV file named `timed_steps.csv` in the same directory. The parser creates this file from the MusicXML input, but the optimizer reads it directly.
+
 **Format:**
 ```csv
 start_time,white_key_index,key
@@ -32,7 +40,7 @@ start_time,white_key_index,key
 ````
 
   * `start_time`: Time in seconds.
-  * `white_key_index`: Integer index of the white key (0 = A0 or C1 depending on your mapping, typically C1=0 for simplicity in this context).
+  * `white_key_index`: Integer index of the white key (typically 0 = A0 or C1, mapped linearly).
   * `key`: Note name for reference (e.g., "C\#4").
 
 ## Usage
@@ -54,7 +62,7 @@ The script generates four files in the current directory:
 
 ## Command Format
 
-The output text files use a specific format for the robot controller:
+The output text files use a specific format designed for the robot controller:
 
 ```text
 <time>:step:<prev_note>-<curr_note>
@@ -73,7 +81,7 @@ The output text files use a specific format for the robot controller:
 
 ## Configuration
 
-You can tune the behavior by modifying the constant at the top of the script:
+You can tune the robot's behavior by modifying the constant at the top of the script:
 
 ```python
 MOVE_PENALTY = 4
