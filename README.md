@@ -1,14 +1,3 @@
-Yes, based on the code provided, the hands are explicitly configured to start at the far ends of the piano in a "parked" position.
-
-  * **Left Hand:** Starts at **G1** (Low/Bass end).
-  * **Right Hand:** Starts at **F7** (High/Treble end).
-
-This ensures the hands are completely out of the way before the song begins.
-
------
-
-Here is the complete `README.md` file content you can copy and paste directly:
-
 ````markdown
 # Robotic Piano Fingering Optimizer
 
