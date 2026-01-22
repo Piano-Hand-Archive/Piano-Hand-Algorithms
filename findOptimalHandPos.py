@@ -1,23 +1,26 @@
 import csv
 import os
+import sys
+import argparse
 from music21 import *
 
 # ==========================================
-# CONFIGURATION
+# GLOBAL CONFIGURATION (Defaults)
+# These are updated by CLI arguments at runtime
 # ==========================================
-
-# Penalty added to cost if the hand moves at all.
-# Higher = Hand stays planted more (less shifting). Lower = Hand glides more.
 MOVE_PENALTY = 4
+AUTO_TRANSPOSE = True
+MAX_KEYS_PER_SECOND = 10.0
+VELOCITY_PENALTY = 100
+MIN_HAND_GAP = 6  # Minimum keys between Left Hand Max and Right Hand Min
 
-# Input MusicXML File
-INPUT_MUSIC_XML = 'happybirthday.musicxml'
 
 # ==========================================
 # PART 1: MUSICXML PARSER
 # ==========================================
 
 def midi_to_white_key_index(midi):
+    """Convert MIDI note number to white key index (0-based)."""
     offset = midi - 12
     octave = offset // 12
     note_in_octave = offset % 12
@@ -27,8 +30,62 @@ def midi_to_white_key_index(midi):
     return octave * 7 + white_key_map[note_in_octave]
 
 
-def parse_musicxml(file):
-    score = converter.parse(file)
+def index_to_note_name(white_key_index):
+    """Convert white key index back to note name (e.g., 21 -> 'C4')."""
+    if white_key_index is None:
+        return "None"
+    octave = white_key_index // 7
+    position_in_octave = white_key_index % 7
+    note_names = ['C', 'D', 'E', 'F', 'G', 'A', 'B']
+    return f"{note_names[position_in_octave]}{octave + 1}"
+
+
+def parse_musicxml(file, auto_transpose=True):
+    """
+    Parse MusicXML and optionally transpose to white-keys-only (C Major or A Minor).
+    Reports any black keys that remain after transposition.
+
+    Args:
+        file: Path to MusicXML file
+        auto_transpose: If True, transposes to C Major/A Minor and filters black keys.
+                       If False, includes all notes (for black key capable hardware).
+    """
+    try:
+        score = converter.parse(file)
+    except Exception as e:
+        print(f"❌ Error parsing file: {e}")
+        sys.exit(1)
+
+    transposed = False
+    target_key = None
+
+    if auto_transpose:
+        try:
+            original_key = score.analyze('key')
+            print(f"  Detected original key: {original_key.name}")
+
+            if original_key.mode == 'major':
+                target_key = key.Key('C')
+            else:
+                target_key = key.Key('a')
+
+            original_tonic_midi = original_key.tonic.midi
+            target_tonic_midi = target_key.tonic.midi
+            semitones = (target_tonic_midi - original_tonic_midi) % 12
+            if semitones > 6:
+                semitones -= 12
+
+            if semitones != 0:
+                score = score.transpose(semitones)
+                transposed = True
+                print(f"  Transposed to {target_key.name} ({semitones:+d} semitones)")
+            else:
+                print(f"  Already in {target_key.name}")
+
+        except Exception as e:
+            print(f"  Warning: Auto-transpose failed ({e}). Using original key.")
+
+    black_keys_found = []
     note_info = []
 
     for part in score.parts:
@@ -38,7 +95,14 @@ def parse_musicxml(file):
 
             if isinstance(music_element, note.Note):
                 if music_element.pitch.alter != 0:
-                    continue
+                    if auto_transpose:
+                        black_keys_found.append({
+                            'time': float(music_element.offset),
+                            'note': music_element.pitch.nameWithOctave,
+                            'type': 'single note'
+                        })
+                        continue
+
                 info = {
                     'type': 'note',
                     'pitch': (music_element.pitch.step,
@@ -52,79 +116,107 @@ def parse_musicxml(file):
                 note_info.append(info)
 
             elif isinstance(music_element, chord.Chord):
+                black_notes_in_chord = [n for n in music_element.notes if n.pitch.alter != 0]
                 white_notes = [n for n in music_element.notes if n.pitch.alter == 0]
-                if white_notes:
+
+                if auto_transpose and black_notes_in_chord:
+                    black_keys_found.append({
+                        'time': float(music_element.offset),
+                        'note': ', '.join([n.pitch.nameWithOctave for n in black_notes_in_chord]),
+                        'type': 'chord'
+                    })
+
+                notes_to_include = white_notes if auto_transpose else music_element.notes
+
+                if notes_to_include:
                     info = {
                         'type': 'chord',
-                        'pitches': [(n.pitch.step,
-                                     n.pitch.octave,
-                                     n.pitch.alter,
-                                     n.pitch.midi)
-                                    for n in white_notes],
+                        'pitches': [(n.pitch.step, n.pitch.octave, n.pitch.alter, n.pitch.midi)
+                                    for n in notes_to_include],
                         'duration': music_element.quarterLength,
-                        'white_key_indices': [midi_to_white_key_index(n.pitch.midi) for n in white_notes],
+                        'white_key_indices': [midi_to_white_key_index(n.pitch.midi)
+                                              for n in notes_to_include],
                         'offset': music_element.offset
                     }
                     note_info.append(info)
+
+    if auto_transpose and black_keys_found:
+        save_black_key_report(file, black_keys_found, transposed, target_key)
+    elif auto_transpose:
+        print("\n✓ SUCCESS: All notes converted to white keys only!\n")
+    else:
+        print(f"\n✓ Loaded {len(note_info)} note events (including black keys)\n")
 
     note_info.sort(key=lambda x: x['offset'])
     return note_info
 
 
-def convert_to_time_steps(note_info):
-    time_steps = []
-    for n in note_info:
-        time_step = []
-        if n['type'] == 'chord':
-            for i, pitch in enumerate(n['pitches']):
-                time_step.append((pitch[3], n['duration'], n['white_key_indices'][i]))
-        else:
-            time_step.append((n['pitch'][3], n['duration'], n['white_key_index']))
-        time_steps.append(time_step)
-    return time_steps
+def save_black_key_report(file, black_keys_found, transposed, target_key):
+    """Save detailed report of black keys that couldn't be converted."""
+    output_dir = os.path.dirname(os.path.abspath(file)) if os.path.dirname(file) else "."
+    csv_path = os.path.join(output_dir, "black_keys_report.csv")
+
+    with open(csv_path, 'w', newline='') as f:
+        writer = csv.writer(f)
+        writer.writerow(['Status', 'UNABLE TO CONVERT FULL SONG TO WHITE KEYS ONLY'])
+        writer.writerow(['Transposed', 'Yes' if transposed else 'No'])
+        if transposed and target_key:
+            writer.writerow(['Target Key', target_key.name])
+        writer.writerow([])
+        writer.writerow(['Time (beats)', 'Note(s)', 'Context'])
+
+        for item in black_keys_found:
+            writer.writerow([f"{item['time']:.2f}", item['note'], item['type']])
+
+        writer.writerow([])
+        writer.writerow(['Total Black Key Occurrences', len(black_keys_found)])
+        writer.writerow(['Warning', 'These notes will be SKIPPED during playback'])
+
+    print(f"\n⚠️  WARNING: {len(black_keys_found)} black key events will be skipped.")
+    print(f"   Details saved to: {csv_path}\n")
 
 
 def convert_to_timed_steps(note_info):
+    """Convert parsed note info to (time, [(midi, duration, white_key_index)]) format."""
     timed_steps = []
     for n in note_info:
         time_step = []
         if n['type'] == 'chord':
             for i, pitch in enumerate(n['pitches']):
-                time_step.append((pitch[3], n['duration'], n['white_key_indices'][i]))
+                if n['white_key_indices'][i] is not None:
+                    time_step.append((pitch[3], n['duration'], n['white_key_indices'][i]))
         else:
-            time_step.append((n['pitch'][3], n['duration'], n['white_key_index']))
-        timed_steps.append((n['offset'], time_step))
+            if n['white_key_index'] is not None:
+                time_step.append((n['pitch'][3], n['duration'], n['white_key_index']))
+
+        if time_step:
+            timed_steps.append((n['offset'], time_step))
+
     return timed_steps
 
 
-def save_timed_steps_csv(note_info, timed_steps, output_dir="."):
+def save_timed_steps_csv(timed_steps, output_dir="."):
+    """Save intermediate timed steps to CSV for debugging and optimizer input."""
     os.makedirs(output_dir, exist_ok=True)
-    csv_path = os.path.join(output_dir, "timed_steps.csv")
-    with open(csv_path, "w", newline="") as f:
+    with open(os.path.join(output_dir, "timed_steps.csv"), "w", newline="") as f:
         writer = csv.writer(f)
-        writer.writerow(["start_time", "key", "midi", "duration", "white_key_index"])
-        note_counter = 0
+        writer.writerow(["start_time", "midi", "duration", "white_key_index"])
         for start_time, step in timed_steps:
-            for i, (midi, duration, white_key_index) in enumerate(step):
-                # Guard against index errors if counts mismatch slightly
-                if note_counter < len(note_info):
-                    note_entry = note_info[note_counter]
-                    if note_entry['type'] == 'note':
-                        key_name = f"{note_entry['pitch'][0]}{note_entry['pitch'][1]}"
-                        note_counter += 1
-                    else:
-                        key_name = f"{note_entry['pitches'][i][0]}{note_entry['pitches'][i][1]}"
-                        if i == len(note_entry['pitches']) - 1:
-                            note_counter += 1
-                    writer.writerow([start_time, key_name, midi, duration, white_key_index])
+            for midi, duration, white_key_index in step:
+                writer.writerow([start_time, midi, duration, white_key_index])
+
 
 # ==========================================
 # PART 2: FINGERING OPTIMIZER
 # ==========================================
 
-def load_notes_grouped_by_time(filename="timed_steps.csv"):
+def load_notes_grouped_by_time(filename):
+    """Load notes from CSV and group by timestamp."""
     notes_by_time = []
     current_time_step = None
+
+    if not os.path.exists(filename):
+        return []
 
     with open(filename, mode='r', newline='') as infile:
         reader = csv.DictReader(infile)
@@ -132,210 +224,144 @@ def load_notes_grouped_by_time(filename="timed_steps.csv"):
             try:
                 start_time = float(row['start_time'])
                 white_key_index = int(row['white_key_index'])
-                key = row['key']
+                duration = float(row['duration'])
+                key_name = index_to_note_name(white_key_index)
 
+                # Group notes that occur at the same time (within 1ms tolerance)
                 if current_time_step is None or abs(start_time - current_time_step['time']) > 0.001:
                     current_time_step = {
                         'time': start_time,
                         'notes': [white_key_index],
-                        'keys': [key]
+                        'durations': [duration],
+                        'keys': [key_name]
                     }
                     notes_by_time.append(current_time_step)
                 else:
                     current_time_step['notes'].append(white_key_index)
-                    current_time_step['keys'].append(key)
-
+                    current_time_step['durations'].append(duration)
+                    current_time_step['keys'].append(key_name)
             except (ValueError, KeyError):
                 pass
 
     return notes_by_time
 
 
-def calculate_transition_cost(prev_thumb_pos, curr_thumb_pos):
-    dist = abs(curr_thumb_pos - prev_thumb_pos)
+def get_active_notes_at_time(note_groups, current_index):
+    """
+    Get notes that are still being held (sustained) at the current time.
+    This ensures the optimizer doesn't move the hand away from sustained notes.
+    """
+    if current_index >= len(note_groups):
+        return set()
+
+    current_time = note_groups[current_index]['time']
+    active_notes = set()
+
+    # Look back up to 20 time steps (optimization to avoid checking entire history)
+    start_lookback = max(0, current_index - 20)
+
+    for i in range(start_lookback, current_index + 1):
+        group = note_groups[i]
+        group_start = group['time']
+
+        for note_idx, duration in zip(group['notes'], group['durations']):
+            # Check if note is still being held (with small buffer for rounding)
+            if group_start <= current_time < (group_start + duration - 0.05):
+                active_notes.add(note_idx)
+
+    return active_notes
+
+
+def calculate_transition_cost(prev_pos, curr_pos, time_delta):
+    """
+    Calculate the cost of moving from prev_pos to curr_pos.
+    Includes velocity penalty if movement would exceed hardware limits.
+    """
+    dist = abs(curr_pos - prev_pos)
     if dist == 0:
         return 0
+
+    # Prevent division by zero
+    if time_delta < 0.001:
+        time_delta = 0.001
+
+    required_velocity = dist / time_delta
+
+    # Apply exponential penalty for exceeding velocity limits
+    if required_velocity > MAX_KEYS_PER_SECOND:
+        excess = required_velocity - MAX_KEYS_PER_SECOND
+        return dist + MOVE_PENALTY + (VELOCITY_PENALTY * excess)
+
     return dist + MOVE_PENALTY
 
 
-def calculate_path_total_cost(path):
-    if not path:
-        return float('inf')
-
-    total_cost = 0
-    active_positions = [p for p in path if p is not None]
-
-    for i in range(1, len(active_positions)):
-        total_cost += calculate_transition_cost(active_positions[i - 1], active_positions[i])
-
-    return total_cost
-
-
-def find_optimal_split_point(note_groups, min_gap=6):
-    all_notes = []
-    for group in note_groups:
-        all_notes.extend(group['notes'])
-
-    if not all_notes:
-        return None
-
-    min_note = min(all_notes)
-    max_note = max(all_notes)
-
-    valid_splits = []
-
-    print(f"Simulating split scenarios between {index_to_note_name(min_note)} and {index_to_note_name(max_note)}...")
-
-    for split in range(min_note, max_note + 1):
-        can_complete = True
-        total_collisions = 0
-
-        for group in note_groups:
-            left = [n for n in group['notes'] if n <= split]
-            right = [n for n in group['notes'] if n >= split + min_gap]
-
-            if left and (max(left) - min(left) > 4):
-                can_complete = False
-                break
-            if right and (max(right) - min(right) > 4):
-                can_complete = False
-                break
-
-            if left and right:
-                if max(left) + min_gap > min(right):
-                    total_collisions += 1
-
-        if can_complete:
-            valid_splits.append({
-                'split': split,
-                'collisions': total_collisions
-            })
-
-    if not valid_splits:
-        print("Error: No valid split point found.")
-        return None
-
-    min_collisions = min(s['collisions'] for s in valid_splits)
-    candidates = [s for s in valid_splits if s['collisions'] == min_collisions]
-
-    print(f"Found {len(candidates)} valid split points. Running full movement simulation...")
-
-    best_split_index = None
-    min_total_movement_cost = float('inf')
-
-    for candidate in candidates:
-        split = candidate['split']
-
-        l_groups, r_groups, _ = assign_hands_to_notes(note_groups, split, min_gap)
-
-        l_bound = split
-        r_bound = split + min_gap
-
-        l_path = optimize_with_boundaries(l_groups, "Left", max_boundary=l_bound, allow_flexibility=False)
-        r_path = optimize_with_boundaries(r_groups, "Right", min_boundary=r_bound, allow_flexibility=False)
-
-        if not l_path or not r_path:
-            continue
-
-        cost = calculate_path_total_cost(l_path) + calculate_path_total_cost(r_path)
-
-        if cost < min_total_movement_cost:
-            min_total_movement_cost = cost
-            best_split_index = split
-
-    if best_split_index is not None:
-        print(f"Optimal split selected: {index_to_note_name(best_split_index)} (Score: {min_total_movement_cost})")
-        return best_split_index
-    else:
-        print("Simulation failed to find a playable path for any split. Using fallback.")
-        return candidates[0]['split']
-
-
-def assign_hands_to_notes(note_groups, split_point, min_gap=6):
-    left_groups = []
-    right_groups = []
-    skipped_notes = []
-
-    for group in note_groups:
-        left_notes = []
-        right_notes = []
-        left_keys = []
-        right_keys = []
-
-        for note, key in zip(group['notes'], group['keys']):
-            assigned = False
-
-            if note <= split_point:
-                left_notes.append(note)
-                left_keys.append(key)
-                assigned = True
-            elif note >= split_point + min_gap:
-                right_notes.append(note)
-                right_keys.append(key)
-                assigned = True
-            else:
-                if note <= split_point + 4:
-                    left_notes.append(note)
-                    left_keys.append(key)
-                    assigned = True
-                elif note >= split_point + min_gap - 4:
-                    right_notes.append(note)
-                    right_keys.append(key)
-                    assigned = True
-
-            if not assigned:
-                skipped_notes.append((group['time'], key))
-
-        left_groups.append({
-                               'time': group['time'],
-                               'notes': left_notes,
-                               'keys': left_keys
-                           } if left_notes else None)
-
-        right_groups.append({
-                                'time': group['time'],
-                                'notes': right_notes,
-                                'keys': right_keys
-                            } if right_notes else None)
-
-    return left_groups, right_groups, split_point
-
-
-def get_possible_states(note_group, max_position=None, min_position=None):
+def get_possible_states(note_groups, current_index, max_position=None, min_position=None):
+    """
+    Get possible thumb positions with sustain checking.
+    A position is only valid if ALL currently-held notes can still be reached.
+    """
+    note_group = note_groups[current_index]
     if note_group is None:
         return []
 
-    notes = note_group['notes']
-    min_note = min(notes)
-    max_note = max(notes)
+    # Get notes that need to start at this time
+    new_notes = set(note_group['notes'])
 
-    span = max_note - min_note
-    if span > 4:
+    # Get notes that are still being held from previous time steps
+    active_notes = get_active_notes_at_time(note_groups, current_index)
+
+    # Combine new and sustained notes
+    all_required_notes = new_notes | active_notes
+
+    if not all_required_notes:
         return []
 
+    min_note = min(all_required_notes)
+    max_note = max(all_required_notes)
+    span = max_note - min_note
+
+    # Enhanced Error Reporting with anti-spam protection
+    if span > 4:
+        # Only print error once per unique timestamp to avoid console spam
+        if not hasattr(get_possible_states, "last_error_time") or \
+                get_possible_states.last_error_time != note_group['time']:
+            print(f"\n❌ IMPOSSIBLE REACH at Time {note_group['time']:.2f}s:")
+            print(f"   Required Notes (indices): {sorted(list(all_required_notes))}")
+            print(f"   Span: {span + 1} keys (Max allowed: 5)")
+            print(f"   Context: New notes {sorted(list(new_notes))} + Sustained {sorted(list(active_notes))}")
+            get_possible_states.last_error_time = note_group['time']
+        return []
+
+    # Calculate range of valid thumb positions
+    # Thumb can be at most 4 keys below the highest note
     start_range = max(0, max_note - 4)
     end_range = min_note
 
+    # Apply boundary constraints if specified
     if max_position is not None:
         end_range = min(end_range, max_position)
     if min_position is not None:
         start_range = max(start_range, min_position)
 
     possible = list(range(start_range, end_range + 1))
-
     return possible if possible else []
 
 
-def optimize_with_boundaries(note_groups, hand_name="Right", max_boundary=None, min_boundary=None,
-                             allow_flexibility=True):
-    valid_groups = []
-    original_indices = []
+def optimize_with_boundaries(note_groups, hand_name, max_boundary=None, min_boundary=None):
+    """
+    Viterbi algorithm to find optimal thumb position path.
 
-    for i, group in enumerate(note_groups):
-        if group is not None:
-            valid_groups.append(group)
-            original_indices.append(i)
+    Args:
+        note_groups: List of note groups at each time step
+        hand_name: "Left" or "Right" for debugging
+        max_boundary: Maximum thumb position allowed (for left hand)
+        min_boundary: Minimum thumb position allowed (for right hand)
 
+    Returns:
+        List of optimal thumb positions for each time step
+    """
+    # Filter out None groups and track their original indices
+    valid_groups = [(i, g) for i, g in enumerate(note_groups) if g is not None]
     if not valid_groups:
         return [None] * len(note_groups)
 
@@ -343,246 +369,502 @@ def optimize_with_boundaries(note_groups, hand_name="Right", max_boundary=None, 
     dp = [{} for _ in range(n)]
     backpointer = [{} for _ in range(n)]
 
-    first_states = get_possible_states(valid_groups[0], max_boundary, min_boundary)
+    # Initial State
+    first_real_idx = valid_groups[0][0]
+    first_states = get_possible_states(note_groups, first_real_idx, max_boundary, min_boundary)
 
-    if not first_states and allow_flexibility:
-        first_states = get_possible_states(valid_groups[0], None, None)
+    # Fallback if boundaries are too tight
+    if not first_states:
+        first_states = get_possible_states(note_groups, first_real_idx, None, None)
 
     if not first_states:
+        print(f"❌ {hand_name} hand: No valid starting position found.")
         return []
 
     for state in first_states:
         dp[0][state] = 0
 
+    # Viterbi Forward Pass
     for i in range(1, n):
-        curr_group = valid_groups[i]
-        possible_states = get_possible_states(curr_group, max_boundary, min_boundary)
+        curr_real_idx = valid_groups[i][0]
+        prev_real_idx = valid_groups[i - 1][0]
 
-        if not possible_states and allow_flexibility:
-            possible_states = get_possible_states(curr_group, None, None)
-
+        possible_states = get_possible_states(note_groups, curr_real_idx, max_boundary, min_boundary)
         if not possible_states:
+            possible_states = get_possible_states(note_groups, curr_real_idx, None, None)
+        if not possible_states:
+            print(f"❌ {hand_name} hand: No valid position at time {note_groups[curr_real_idx]['time']:.2f}s")
             return []
+
+        time_delta = note_groups[curr_real_idx]['time'] - note_groups[prev_real_idx]['time']
 
         for curr_state in possible_states:
             min_cost = float('inf')
-            best_prev_state = None
+            best_prev = None
 
             for prev_state, prev_cost in dp[i - 1].items():
-                transition = calculate_transition_cost(prev_state, curr_state)
+                cost = prev_cost + calculate_transition_cost(prev_state, curr_state, time_delta)
 
-                boundary_penalty = 0
-                if max_boundary is not None and curr_state > max_boundary:
-                    boundary_penalty = 10
-                if min_boundary is not None and curr_state < min_boundary:
-                    boundary_penalty = 10
+                # Boundary Soft Penalties (keeps hands apart)
+                if max_boundary and curr_state > max_boundary:
+                    cost += 1000
+                if min_boundary and curr_state < min_boundary:
+                    cost += 1000
 
-                total_cost = prev_cost + transition + boundary_penalty
+                if cost < min_cost:
+                    min_cost = cost
+                    best_prev = prev_state
 
-                if total_cost < min_cost:
-                    min_cost = total_cost
-                    best_prev_state = prev_state
-
-            if best_prev_state is not None:
+            if best_prev is not None:
                 dp[i][curr_state] = min_cost
-                backpointer[i][curr_state] = best_prev_state
+                backpointer[i][curr_state] = best_prev
 
-    last_costs = dp[-1]
-    if not last_costs:
+    # Backtrack to find optimal path
+    if not dp[-1]:
+        print(f"❌ {hand_name} hand: Optimization failed - no valid path found.")
         return []
 
-    current_state = min(last_costs, key=last_costs.get)
-    optimal_path = [current_state]
+    curr_state = min(dp[-1], key=dp[-1].get)
+    path_segment = [curr_state]
 
     for i in range(n - 1, 0, -1):
-        prev_state = backpointer[i][current_state]
-        optimal_path.insert(0, prev_state)
-        current_state = prev_state
+        prev_state = backpointer[i][curr_state]
+        path_segment.insert(0, prev_state)
+        curr_state = prev_state
 
+    # Map back to full timeline
     full_path = [None] * len(note_groups)
-    for i, orig_idx in enumerate(original_indices):
-        full_path[orig_idx] = optimal_path[i]
+    for k, (real_idx, _) in enumerate(valid_groups):
+        full_path[real_idx] = path_segment[k]
 
     return full_path
 
 
-def global_optimization(note_groups, split_point, min_gap=6):
-    left_groups, right_groups, final_split = assign_hands_to_notes(note_groups, split_point, min_gap)
+def assign_hands_to_notes(note_groups, split_point):
+    """
+    Assign notes to left or right hand based on split point.
+    Notes below split go to left hand, notes above split+gap go to right hand.
+    """
+    l_groups, r_groups = [], []
 
-    if left_groups is None:
-        return None, None, None, None, None
+    for group in note_groups:
+        if not group:
+            l_groups.append(None)
+            r_groups.append(None)
+            continue
 
-    left_max_boundary = split_point
-    right_min_boundary = split_point + min_gap
+        l_notes, r_notes = [], []
+        l_keys, r_keys = [], []
+        l_durs, r_durs = [], []
 
-    left_path = optimize_with_boundaries(left_groups, "Left", max_boundary=left_max_boundary)
-    right_path = optimize_with_boundaries(right_groups, "Right", min_boundary=right_min_boundary)
+        for note, key, dur in zip(group['notes'], group['keys'], group['durations']):
+            # Determine hand assignment
+            is_right = False
+            if note >= split_point + MIN_HAND_GAP:
+                is_right = True
+            elif note > split_point and note < split_point + MIN_HAND_GAP:
+                # In the gap: assign based on proximity to typical hand centers
+                if note > split_point + (MIN_HAND_GAP / 2):
+                    is_right = True
 
-    if not left_path and not right_path:
-        return None, None, None, None, None
+            if is_right:
+                r_notes.append(note)
+                r_keys.append(key)
+                r_durs.append(dur)
+            else:
+                l_notes.append(note)
+                l_keys.append(key)
+                l_durs.append(dur)
 
-    return left_path, right_path, final_split, left_groups, right_groups
+        l_groups.append({
+                            'time': group['time'],
+                            'notes': l_notes,
+                            'durations': l_durs,
+                            'keys': l_keys
+                        } if l_notes else None)
+
+        r_groups.append({
+                            'time': group['time'],
+                            'notes': r_notes,
+                            'durations': r_durs,
+                            'keys': r_keys
+                        } if r_notes else None)
+
+    return l_groups, r_groups
 
 
-def index_to_note_name(white_key_index):
-    octave = white_key_index // 7
-    position_in_octave = white_key_index % 7
-    note_names = ['C', 'D', 'E', 'F', 'G', 'A', 'B']
-    return f"{note_names[position_in_octave]}{octave + 1}"
+def calculate_path_cost(path, note_groups):
+    """Calculate total movement cost of a path."""
+    if not path:
+        return 0
+
+    valid_indices = [i for i, p in enumerate(path) if p is not None]
+    if len(valid_indices) < 2:
+        return 0
+
+    cost = 0
+    for k in range(1, len(valid_indices)):
+        curr_i, prev_i = valid_indices[k], valid_indices[k - 1]
+        dt = note_groups[curr_i]['time'] - note_groups[prev_i]['time']
+        cost += calculate_transition_cost(path[prev_i], path[curr_i], dt)
+
+    return cost
+
+
+def find_optimal_split_point(note_groups):
+    """
+    Find optimal split point using 'Coarse-to-Fine' search.
+    Phase 1: Check every 3rd key
+    Phase 2: Refine around best candidate
+    """
+    all_notes = []
+    for g in note_groups:
+        all_notes.extend(g['notes'])
+
+    if not all_notes:
+        return None
+
+    min_n, max_n = min(all_notes), max(all_notes)
+
+    # Phase 1: Coarse Search (Every 3 keys)
+    candidates = []
+    step = 3
+    print(
+        f"  Phase 1: Scanning split points from {index_to_note_name(min_n)} to {index_to_note_name(max_n)} (step={step})...")
+
+    search_range = list(range(min_n, max_n + 1, step))
+    total_checks = len(search_range)
+    checked = 0
+
+    for split in search_range:
+        checked += 1
+        l_groups, r_groups = assign_hands_to_notes(note_groups, split)
+
+        # Quick feasibility check before full Viterbi
+        l_path = optimize_with_boundaries(l_groups, "Left", max_boundary=split)
+        if not l_path:
+            continue
+
+        r_path = optimize_with_boundaries(r_groups, "Right", min_boundary=split + MIN_HAND_GAP)
+        if not r_path:
+            continue
+
+        cost = calculate_path_cost(l_path, l_groups) + calculate_path_cost(r_path, r_groups)
+        candidates.append((split, cost))
+        print(f"\r    Progress: {checked}/{total_checks} - Testing {index_to_note_name(split)}: Cost {cost:.0f}  ",
+              end="", flush=True)
+
+    print()  # New line after progress
+
+    if not candidates:
+        print("  ❌ No valid split points found in coarse search.")
+        return None
+
+    best_candidate = min(candidates, key=lambda x: x[1])
+    best_split, best_cost = best_candidate
+
+    # Phase 2: Refine neighborhood (+/- 2 keys)
+    print(f"  Phase 2: Refining around {index_to_note_name(best_split)}...")
+    final_best_split = best_split
+    final_best_cost = best_cost
+
+    for split in range(best_split - 2, best_split + 3):
+        if split == best_split or split < min_n or split > max_n:
+            continue
+
+        l_groups, r_groups = assign_hands_to_notes(note_groups, split)
+        l_path = optimize_with_boundaries(l_groups, "Left", max_boundary=split)
+        r_path = optimize_with_boundaries(r_groups, "Right", min_boundary=split + MIN_HAND_GAP)
+
+        if l_path and r_path:
+            cost = calculate_path_cost(l_path, l_groups) + calculate_path_cost(r_path, r_groups)
+            if cost < final_best_cost:
+                final_best_cost = cost
+                final_best_split = split
+                print(f"    Found better split: {index_to_note_name(split)} (Cost: {cost:.0f})")
+
+    print(f"  ✓ Optimal Split: {index_to_note_name(final_best_split)} (Total Cost: {final_best_cost:.0f})")
+    return final_best_split
 
 
 def generate_servo_commands(hand_path, hand_groups, hand_name, start_position):
+    """
+    Generate servo commands from optimized path.
+
+    Args:
+        hand_path: List of thumb positions at each time step
+        hand_groups: Note groups assigned to this hand
+        hand_name: "Left" or "Right"
+        start_position: Parked position (e.g., "G1" for left, "F7" for right)
+
+    Returns:
+        List of command strings in format "time:step:from-to" and "time:servo:1,3,5"
+    """
     commands = []
 
-    first_playing_idx = None
-    for i in range(len(hand_groups)):
-        if hand_groups[i] is not None and hand_path[i] is not None:
-            first_playing_idx = i
-            break
+    # Find first active note to move from park position
+    first_idx = next((i for i, p in enumerate(hand_path) if p is not None), None)
+    if first_idx is None:
+        return []
 
-    if first_playing_idx is None:
-        return commands
+    curr_thumb = hand_path[first_idx]
+    curr_time = hand_groups[first_idx]['time']
+    commands.append(f"{curr_time}:step:{start_position}-{index_to_note_name(curr_thumb)}")
 
-    start_note = start_position
-    first_thumb_note = index_to_note_name(hand_path[first_playing_idx])
-    first_time = hand_groups[first_playing_idx]['time']
+    prev_thumb = curr_thumb
 
-    commands.append(f"{first_time}:step:{start_note}-{first_thumb_note}")
-
-    prev_thumb_pos = hand_path[first_playing_idx]
-
-    for i in range(len(hand_groups)):
-        if hand_groups[i] is None or hand_path[i] is None:
+    for i in range(first_idx, len(hand_groups)):
+        if hand_path[i] is None:
             continue
 
-        curr_thumb_pos = hand_path[i]
+        curr_thumb = hand_path[i]
         curr_time = hand_groups[i]['time']
 
-        prev_note = index_to_note_name(prev_thumb_pos)
-        curr_note = index_to_note_name(curr_thumb_pos)
-        commands.append(f"{curr_time}:step:{prev_note}-{curr_note}")
+        # Step command (hand movement)
+        commands.append(f"{curr_time}:step:{index_to_note_name(prev_thumb)}-{index_to_note_name(curr_thumb)}")
 
-        fingers = []
-        for note_idx in hand_groups[i]['notes']:
-            finger = note_idx - curr_thumb_pos + 1
-            fingers.append(str(finger))
+        # Servo command (finger activation)
+        fingers = [str(n - curr_thumb + 1) for n in hand_groups[i]['notes']]
+        commands.append(f"{curr_time}:servo:{','.join(fingers)}")
 
-        servo_line = f"{curr_time}:servo:{','.join(fingers)}"
-        commands.append(servo_line)
-
-        prev_thumb_pos = curr_thumb_pos
+        prev_thumb = curr_thumb
 
     return commands
 
 
-def save_servo_files(left_commands, right_commands, output_dir="."):
+def validate_output(l_path, r_path, note_groups):
+    """
+    Validate generated paths for physical feasibility.
+    Checks for velocity violations and collision risks.
+
+    Returns:
+        List of warning/error messages
+    """
+    issues = []
+
+    # 1. Velocity Checks
+    for path, name in [(l_path, "Left"), (r_path, "Right")]:
+        valid_idxs = [i for i, p in enumerate(path) if p is not None]
+        for k in range(1, len(valid_idxs)):
+            curr, prev = valid_idxs[k], valid_idxs[k - 1]
+            dist = abs(path[curr] - path[prev])
+            dt = note_groups[curr]['time'] - note_groups[prev]['time']
+            if dt > 0 and (dist / dt) > MAX_KEYS_PER_SECOND:
+                issues.append(
+                    f"{name} Velocity Violation: {dist} keys in {dt:.3f}s "
+                    f"({dist / dt:.1f} keys/sec) at Time {note_groups[curr]['time']:.2f}s"
+                )
+
+    # 2. Collision Checks
+    for i in range(len(note_groups)):
+        if l_path[i] is not None and r_path[i] is not None:
+            # Check if hands are crossing
+            if r_path[i] <= l_path[i]:
+                issues.append(
+                    f"Collision Risk: Hands crossed at Time {note_groups[i]['time']:.2f}s "
+                    f"(Left thumb: {l_path[i]}, Right thumb: {r_path[i]})"
+                )
+
+    return issues
+
+
+def save_outputs(l_cmd, r_cmd, l_path, r_path, l_groups, r_groups, split, note_groups, output_dir):
+    """Save all output files."""
     os.makedirs(output_dir, exist_ok=True)
+
+    # 1. Servo command files
     with open(os.path.join(output_dir, "left_hand_commands.txt"), 'w') as f:
-        f.write('\n'.join(left_commands))
+        f.write('\n'.join(l_cmd))
+
     with open(os.path.join(output_dir, "right_hand_commands.txt"), 'w') as f:
-        f.write('\n'.join(right_commands))
+        f.write('\n'.join(r_cmd))
 
+    # 2. Fingering Plan CSV
+    with open(os.path.join(output_dir, "fingering_plan.csv"), 'w', newline='') as f:
+        writer = csv.writer(f)
+        writer.writerow(['Time', 'L_Notes', 'L_Thumb', 'L_Fingers', 'R_Notes', 'R_Thumb', 'R_Fingers'])
 
-def save_summary_csv(left_path, right_path, left_groups, right_groups, split_point, output_dir="."):
-    os.makedirs(output_dir, exist_ok=True)
+        for i in range(len(note_groups)):
+            time = note_groups[i]['time'] if note_groups[i] else 0
 
-    left_positions = [p for p in left_path if p is not None]
-    right_positions = [p for p in right_path if p is not None]
+            l_n = ';'.join(l_groups[i]['keys']) if l_groups[i] else ""
+            l_t = str(l_path[i]) if l_path[i] is not None else ""
+            l_f = ';'.join([str(n - l_path[i] + 1) for n in l_groups[i]['notes']]) if l_groups[i] and l_path[
+                i] is not None else ""
 
-    left_moves = sum(1 for i in range(1, len(left_path))
-                     if left_path[i] is not None and left_path[i - 1] is not None
-                     and left_path[i] != left_path[i - 1])
-    right_moves = sum(1 for i in range(1, len(right_path))
-                      if right_path[i] is not None and right_path[i - 1] is not None
-                      and right_path[i] != right_path[i - 1])
+            r_n = ';'.join(r_groups[i]['keys']) if r_groups[i] else ""
+            r_t = str(r_path[i]) if r_path[i] is not None else ""
+            r_f = ';'.join([str(n - r_path[i] + 1) for n in r_groups[i]['notes']]) if r_groups[i] and r_path[
+                i] is not None else ""
 
-    left_max = max(left_positions) if left_positions else 0
-    right_min = min(right_positions) if right_positions else 0
+            writer.writerow([time, l_n, l_t, l_f, r_n, r_t, r_f])
 
+    # 3. Summary CSV
     with open(os.path.join(output_dir, "fingering_summary.csv"), 'w', newline='') as f:
         writer = csv.writer(f)
         writer.writerow(['Metric', 'Left Hand', 'Right Hand', 'Combined'])
-        writer.writerow(['Split Point', index_to_note_name(split_point), split_point, ''])
-        writer.writerow(['Position Changes', left_moves, right_moves, left_moves + right_moves])
-        writer.writerow(['Max Position', index_to_note_name(left_max), index_to_note_name(right_min),
-                         f"Gap: {right_min - left_max} keys"])
+
+        l_moves = sum(1 for i in range(1, len(l_path))
+                      if l_path[i] is not None and l_path[i - 1] is not None and l_path[i] != l_path[i - 1])
+        r_moves = sum(1 for i in range(1, len(r_path))
+                      if r_path[i] is not None and r_path[i - 1] is not None and r_path[i] != r_path[i - 1])
+
+        writer.writerow(['Split Point', index_to_note_name(split), split, ''])
+        writer.writerow(['Position Changes', l_moves, r_moves, l_moves + r_moves])
+        writer.writerow(['Hardware Limit', f'{MAX_KEYS_PER_SECOND} keys/sec',
+                         f'{MAX_KEYS_PER_SECOND} keys/sec', 'Enforced'])
+        writer.writerow(['Movement Penalty', MOVE_PENALTY, MOVE_PENALTY, ''])
+        writer.writerow(['Hand Gap', '', '', f'{MIN_HAND_GAP} keys'])
 
 
-def save_fingering_plan_csv(note_groups, left_path, right_path, left_groups, right_groups, output_dir="."):
-    os.makedirs(output_dir, exist_ok=True)
-    with open(os.path.join(output_dir, "fingering_plan.csv"), 'w', newline='') as f:
-        writer = csv.writer(f)
-        writer.writerow(
-            ['Time', 'Left_Notes', 'Left_Thumb', 'Left_Fingers', 'Right_Notes', 'Right_Thumb', 'Right_Fingers'])
+# ==========================================
+# MAIN EXECUTION
+# ==========================================
 
-        for i in range(len(note_groups)):
-            time = note_groups[i]['time']
+def parse_arguments():
+    """Parse command line arguments."""
+    parser = argparse.ArgumentParser(
+        description='Robotic Piano Fingering Optimizer',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  %(prog)s song.musicxml
+  %(prog)s song.musicxml --speed 15 --gap 8
+  %(prog)s song.musicxml --penalty 10 --no-transpose
+  %(prog)s song.musicxml --output ./outputs
+        """
+    )
 
-            l_notes, l_thumb, l_fingers = "", "", ""
-            if left_groups[i] and left_path[i] is not None:
-                l_notes = ';'.join(left_groups[i]['keys'])
-                l_thumb = str(left_path[i])
-                l_fingers = ';'.join(str(n - left_path[i] + 1) for n in left_groups[i]['notes'])
+    parser.add_argument('file', nargs='?',
+                        help='Input MusicXML file')
+    parser.add_argument('--speed', type=float, default=10.0,
+                        help='Max keys per second (default: 10)')
+    parser.add_argument('--penalty', type=int, default=4,
+                        help='Movement penalty cost (default: 4)')
+    parser.add_argument('--gap', type=int, default=6,
+                        help='Min keys between hands (default: 6)')
+    parser.add_argument('--no-transpose', action='store_true',
+                        help='Disable auto-transposition to white keys')
+    parser.add_argument('--output', default='.',
+                        help='Output directory (default: current directory)')
 
-            r_notes, r_thumb, r_fingers = "", "", ""
-            if right_groups[i] and right_path[i] is not None:
-                r_notes = ';'.join(right_groups[i]['keys'])
-                r_thumb = str(right_path[i])
-                r_fingers = ';'.join(str(n - right_path[i] + 1) for n in right_groups[i]['notes'])
-
-            writer.writerow([time, l_notes, l_thumb, l_fingers, r_notes, r_thumb, r_fingers])
+    return parser.parse_args()
 
 
 def main():
-    # ==========================
-    # STEP 1: PARSE MUSICXML
-    # ==========================
-    if not os.path.exists(INPUT_MUSIC_XML):
-        print(f"Error: {INPUT_MUSIC_XML} not found.")
-        return
+    """Main execution function."""
+    args = parse_arguments()
 
-    print(f"Parsing {INPUT_MUSIC_XML}...")
-    note_info = parse_musicxml(INPUT_MUSIC_XML)
+    # Validate input file
+    if not args.file:
+        print("❌ Error: Please provide a MusicXML file")
+        print("\nUsage: python findOptimalHandPos.py <file.musicxml> [options]")
+        print("Use --help for more information")
+        sys.exit(1)
+
+    if not os.path.exists(args.file):
+        print(f"❌ Error: File '{args.file}' not found")
+        sys.exit(1)
+
+    # Update Globals from CLI
+    global MAX_KEYS_PER_SECOND, MOVE_PENALTY, MIN_HAND_GAP, AUTO_TRANSPOSE
+    MAX_KEYS_PER_SECOND = args.speed
+    MOVE_PENALTY = args.penalty
+    MIN_HAND_GAP = args.gap
+    AUTO_TRANSPOSE = not args.no_transpose
+
+    print("=" * 50)
+    print("ROBOTIC PIANO FINGERING OPTIMIZER")
+    print("=" * 50)
+    print(f"Input File:      {args.file}")
+    print(f"Speed Limit:     {MAX_KEYS_PER_SECOND} keys/sec")
+    print(f"Movement Penalty: {MOVE_PENALTY}")
+    print(f"Hand Gap:        {MIN_HAND_GAP} keys")
+    print(f"Auto-Transpose:  {AUTO_TRANSPOSE}")
+    print(f"Output Dir:      {args.output}")
+    print("=" * 50)
+    print()
+
+    # Step 1: Parse MusicXML
+    print("STEP 1: Parsing MusicXML...")
+    note_info = parse_musicxml(args.file, AUTO_TRANSPOSE)
+
+    if not note_info:
+        print("❌ No playable notes found.")
+        sys.exit(1)
+
     timed_steps = convert_to_timed_steps(note_info)
+    save_timed_steps_csv(timed_steps, args.output)
+    print("  ✓ timed_steps.csv generated")
 
-    output_dir = os.path.dirname(os.path.abspath(__file__))
-    save_timed_steps_csv(note_info, timed_steps, output_dir)
-    print("  -> timed_steps.csv generated.")
+    # Step 2: Load grouped notes
+    print("\nSTEP 2: Loading notes for optimization...")
+    note_groups = load_notes_grouped_by_time(os.path.join(args.output, "timed_steps.csv"))
+    print(f"  ✓ Loaded {len(note_groups)} time steps")
 
-    # ==========================
-    # STEP 2: RUN OPTIMIZER
-    # ==========================
-    print("Loading notes for optimization...")
-    note_groups = load_notes_grouped_by_time("timed_steps.csv")
-    if not note_groups:
-        print("Error: No notes loaded.")
-        return
+    # Step 3: Find optimal split point
+    print("\nSTEP 3: Finding optimal split point...")
+    split_point = find_optimal_split_point(note_groups)
 
-    print("Finding optimal split point...")
-    optimal_split = find_optimal_split_point(note_groups, min_gap=6)
+    if split_point is None:
+        print("❌ FATAL: Could not find any valid split point.")
+        print("   The song may exceed the 5-key hand span or have other constraints.")
+        sys.exit(1)
 
-    if optimal_split is None:
-        print("Optimization failed: Could not find valid split point.")
-        return
+    # Step 4: Run global optimization
+    print("\nSTEP 4: Running global path optimization...")
+    l_groups, r_groups = assign_hands_to_notes(note_groups, split_point)
 
-    print("Running global path optimization...")
-    result = global_optimization(note_groups, optimal_split, min_gap=6)
+    print("  Optimizing left hand...")
+    l_path = optimize_with_boundaries(l_groups, "Left", max_boundary=split_point)
 
-    if result[0] is None:
-        print("Optimization failed during path generation.")
-        return
+    print("  Optimizing right hand...")
+    r_path = optimize_with_boundaries(r_groups, "Right", min_boundary=split_point + MIN_HAND_GAP)
 
-    left_path, right_path, split_point, left_groups, right_groups = result
+    if not l_path or not r_path:
+        print("❌ FATAL: Optimization failed during path generation.")
+        sys.exit(1)
 
-    # Generate Commands with fixed starting positions (Parked)
-    left_commands = generate_servo_commands(left_path, left_groups, "Left", "G1")
-    right_commands = generate_servo_commands(right_path, right_groups, "Right", "F7")
+    print("  ✓ Optimization complete")
 
-    print("Saving output files...")
-    save_servo_files(left_commands, right_commands)
-    save_summary_csv(left_path, right_path, left_groups, right_groups, split_point)
-    save_fingering_plan_csv(note_groups, left_path, right_path, left_groups, right_groups)
-    print(f"Optimization Complete. Split Point: {index_to_note_name(optimal_split)}")
+    # Step 5: Safety validation
+    print("\nSTEP 5: Validating output for safety...")
+    issues = validate_output(l_path, r_path, note_groups)
+
+    if issues:
+        print("\n⚠️  SAFETY WARNINGS:")
+        for issue in issues[:10]:  # Show first 10 issues
+            print(f"  • {issue}")
+        if len(issues) > 10:
+            print(f"  ... and {len(issues) - 10} more warnings.")
+        print("\n  Review these warnings before deploying to hardware!")
+    else:
+        print("  ✓ All safety checks passed")
+
+    # Step 6: Generate servo commands
+    print("\nSTEP 6: Generating servo commands...")
+    l_cmd = generate_servo_commands(l_path, l_groups, "Left", "G1")
+    r_cmd = generate_servo_commands(r_path, r_groups, "Right", "F7")
+    print(f"  ✓ Generated {len(l_cmd)} left hand commands")
+    print(f"  ✓ Generated {len(r_cmd)} right hand commands")
+
+    # Step 7: Save all outputs
+    print("\nSTEP 7: Saving output files...")
+    save_outputs(l_cmd, r_cmd, l_path, r_path, l_groups, r_groups, split_point, note_groups, args.output)
+
+    print("\n" + "=" * 50)
+    print("✓ OPTIMIZATION COMPLETE!")
+    print("=" * 50)
+    print(f"Split Point:     {index_to_note_name(split_point)} (index {split_point})")
+    print(f"Output Files:    {args.output}/")
+    print("  • left_hand_commands.txt")
+    print("  • right_hand_commands.txt")
+    print("  • fingering_plan.csv")
+    print("  • fingering_summary.csv")
+    print("  • timed_steps.csv")
+    if AUTO_TRANSPOSE:
+        print("  • black_keys_report.csv (if applicable)")
+    print("=" * 50)
 
 
 if __name__ == '__main__':
