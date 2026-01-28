@@ -20,24 +20,33 @@ MIN_HAND_GAP = 6  # Minimum keys between Left Hand Max and Right Hand Min
 # ==========================================
 
 def midi_to_white_key_index(midi):
-    """Convert MIDI note number to white key index (0-based)."""
-    offset = midi - 12
+    """Convert MIDI note number to white key index (0-based, 0 = A0)."""
+    offset = midi - 21  # A0 = MIDI 21 (standard piano range starts here)
     octave = offset // 12
     note_in_octave = offset % 12
-    white_key_map = {0: 0, 2: 1, 4: 2, 5: 3, 7: 4, 9: 5, 11: 6}
+    # Correct map for A-based indexing: A=0, B=2, C=3, D=5, E=7, F=8, G=10
+    white_key_map = {0: 0, 2: 1, 3: 2, 5: 3, 7: 4, 8: 5, 10: 6}
     if note_in_octave not in white_key_map:
         return None
     return octave * 7 + white_key_map[note_in_octave]
 
 
 def index_to_note_name(white_key_index):
-    """Convert white key index back to note name (e.g., 21 -> 'C4')."""
+    """Convert white key index back to note name (0 = A0, 1 = B0, 2 = C1, etc.)."""
     if white_key_index is None:
         return "None"
-    octave = white_key_index // 7
-    position_in_octave = white_key_index % 7
-    note_names = ['C', 'D', 'E', 'F', 'G', 'A', 'B']
-    return f"{note_names[position_in_octave]}{octave + 1}"
+    # A0 and B0 are in octave 0, C1-G1 in octave 1, etc.
+    position = white_key_index % 7
+    names = ['A', 'B', 'C', 'D', 'E', 'F', 'G']
+
+    # Calculate octave number: A and B stay in their group's octave,
+    # but C-G are labeled with the next octave number
+    if position <= 1:  # A or B
+        octave = white_key_index // 7
+    else:  # C, D, E, F, or G
+        octave = white_key_index // 7 + 1
+
+    return f"{names[position]}{octave}"
 
 
 def parse_musicxml(file, auto_transpose=True):
@@ -250,49 +259,41 @@ def get_active_notes_at_time(note_groups, current_index):
     """
     Get notes that are still being held (sustained) at the current time.
     This ensures the optimizer doesn't move the hand away from sustained notes.
+
+    FIXED: Uses TIME-based lookback instead of INDEX-based to handle slow music correctly.
     """
     if current_index >= len(note_groups):
+        return set()
+
+    if note_groups[current_index] is None:
         return set()
 
     current_time = note_groups[current_index]['time']
     active_notes = set()
 
-    # Look back up to 20 time steps (optimization to avoid checking entire history)
-    start_lookback = max(0, current_index - 20)
+    # FIXED: Look back by TIME (10 seconds), not by INDEX
+    # This handles slow music (whole notes, fermatas, etc.) correctly
+    MAX_LOOKBACK_TIME = 10.0  # seconds - longer than any reasonable piano sustain
 
-    for i in range(start_lookback, current_index + 1):
+    for i in range(current_index - 1, -1, -1):
         group = note_groups[i]
+
+        if group is None:
+            continue
+
+        # Stop if we've gone back more than 10 seconds
+        if current_time - group['time'] > MAX_LOOKBACK_TIME:
+            break
+
         group_start = group['time']
 
         for note_idx, duration in zip(group['notes'], group['durations']):
-            # Check if note is still being held (with small buffer for rounding)
-            if group_start <= current_time < (group_start + duration - 0.05):
+            # Check if note is still being held (with 50ms buffer for rounding)
+            note_end_time = group_start + duration
+            if note_end_time > current_time + 0.05:
                 active_notes.add(note_idx)
 
     return active_notes
-
-
-def calculate_transition_cost(prev_pos, curr_pos, time_delta):
-    """
-    Calculate the cost of moving from prev_pos to curr_pos.
-    Includes velocity penalty if movement would exceed hardware limits.
-    """
-    dist = abs(curr_pos - prev_pos)
-    if dist == 0:
-        return 0
-
-    # Prevent division by zero
-    if time_delta < 0.001:
-        time_delta = 0.001
-
-    required_velocity = dist / time_delta
-
-    # Apply exponential penalty for exceeding velocity limits
-    if required_velocity > MAX_KEYS_PER_SECOND:
-        excess = required_velocity - MAX_KEYS_PER_SECOND
-        return dist + MOVE_PENALTY + (VELOCITY_PENALTY * excess)
-
-    return dist + MOVE_PENALTY
 
 
 def get_possible_states(note_groups, current_index, max_position=None, min_position=None):
@@ -345,6 +346,38 @@ def get_possible_states(note_groups, current_index, max_position=None, min_posit
 
     possible = list(range(start_range, end_range + 1))
     return possible if possible else []
+
+
+def calculate_transition_cost(prev_state, curr_state, time_delta):
+    """
+    Calculate the cost of transitioning from one thumb position to another.
+
+    Args:
+        prev_state: Previous thumb position (white key index)
+        curr_state: Current thumb position (white key index)
+        time_delta: Time difference between positions (in beats/seconds)
+
+    Returns:
+        Total transition cost (distance + penalties)
+    """
+    # Calculate distance traveled
+    distance = abs(curr_state - prev_state)
+
+    # Base cost is just the distance
+    cost = distance
+
+    # Add movement penalty if hand moved
+    if distance > 0:
+        cost += MOVE_PENALTY
+
+        # Calculate velocity penalty if movement is too fast
+        if time_delta > 0:
+            required_velocity = distance / time_delta
+            if required_velocity > MAX_KEYS_PER_SECOND:
+                velocity_excess = required_velocity - MAX_KEYS_PER_SECOND
+                cost += VELOCITY_PENALTY * velocity_excess
+
+    return cost
 
 
 def optimize_with_boundaries(note_groups, hand_name, max_boundary=None, min_boundary=None):
@@ -591,6 +624,9 @@ def generate_servo_commands(hand_path, hand_groups, hand_name, start_position):
     """
     Generate servo commands from optimized path.
 
+    FIXED: Properly handles preparation time by shifting timeline forward if needed.
+    No negative timestamps are ever generated.
+
     Args:
         hand_path: List of thumb positions at each time step
         hand_groups: Note groups assigned to this hand
@@ -598,38 +634,53 @@ def generate_servo_commands(hand_path, hand_groups, hand_name, start_position):
         start_position: Parked position (e.g., "G1" for left, "F7" for right)
 
     Returns:
-        List of command strings in format "time:step:from-to" and "time:servo:1,3,5"
+        Tuple of (commands, time_shift):
+            - commands: List of command strings in format "time:step:from-to" and "time:servo:1,3,5"
+            - time_shift: Amount of time (seconds) the entire timeline was shifted forward
     """
     commands = []
 
     # Find first active note to move from park position
     first_idx = next((i for i, p in enumerate(hand_path) if p is not None), None)
     if first_idx is None:
-        return []
+        return [], 0.0
 
     curr_thumb = hand_path[first_idx]
-    curr_time = hand_groups[first_idx]['time']
-    commands.append(f"{curr_time}:step:{start_position}-{index_to_note_name(curr_thumb)}")
+    first_note_time = hand_groups[first_idx]['time']
 
+    # Calculate time shift needed to ensure preparation time
+    PREPARATION_TIME = 1.0  # seconds needed to move from park to position
+    time_shift = 0.0
+
+    if first_note_time < PREPARATION_TIME:
+        # Shift entire timeline forward to make room for preparation
+        time_shift = PREPARATION_TIME - first_note_time
+        print(f"  ℹ️  {hand_name} hand: Timeline shifted forward by {time_shift:.2f}s for preparation")
+
+    # Initial positioning command (always at t=0.0 after any shift)
+    commands.append(f"0.0:step:{start_position}-{index_to_note_name(curr_thumb)}")
     prev_thumb = curr_thumb
 
+    # Generate commands for all notes with time shift applied
     for i in range(first_idx, len(hand_groups)):
         if hand_path[i] is None:
             continue
 
         curr_thumb = hand_path[i]
-        curr_time = hand_groups[i]['time']
+        # Apply time shift to all timestamps
+        curr_time = hand_groups[i]['time'] + time_shift
 
-        # Step command (hand movement)
-        commands.append(f"{curr_time}:step:{index_to_note_name(prev_thumb)}-{index_to_note_name(curr_thumb)}")
+        # Step command (hand movement) - only if hand actually moved
+        if curr_thumb != prev_thumb:
+            commands.append(f"{curr_time:.3f}:step:{index_to_note_name(prev_thumb)}-{index_to_note_name(curr_thumb)}")
 
         # Servo command (finger activation)
         fingers = [str(n - curr_thumb + 1) for n in hand_groups[i]['notes']]
-        commands.append(f"{curr_time}:servo:{','.join(fingers)}")
+        commands.append(f"{curr_time:.3f}:servo:{','.join(fingers)}")
 
         prev_thumb = curr_thumb
 
-    return commands
+    return commands, time_shift
 
 
 def validate_output(l_path, r_path, note_groups):
@@ -668,7 +719,7 @@ def validate_output(l_path, r_path, note_groups):
     return issues
 
 
-def save_outputs(l_cmd, r_cmd, l_path, r_path, l_groups, r_groups, split, note_groups, output_dir):
+def save_outputs(l_cmd, r_cmd, l_path, r_path, l_groups, r_groups, split, note_groups, output_dir, time_shift=0.0):
     """Save all output files."""
     os.makedirs(output_dir, exist_ok=True)
 
@@ -715,6 +766,12 @@ def save_outputs(l_cmd, r_cmd, l_path, r_path, l_groups, r_groups, split, note_g
                          f'{MAX_KEYS_PER_SECOND} keys/sec', 'Enforced'])
         writer.writerow(['Movement Penalty', MOVE_PENALTY, MOVE_PENALTY, ''])
         writer.writerow(['Hand Gap', '', '', f'{MIN_HAND_GAP} keys'])
+
+        # Add time shift information
+        if time_shift > 0:
+            writer.writerow(['Timeline Shift', f'{time_shift:.2f}s', f'{time_shift:.2f}s', 'Applied for preparation'])
+        else:
+            writer.writerow(['Timeline Shift', 'None', 'None', 'No shift needed'])
 
 
 # ==========================================
@@ -843,14 +900,19 @@ def main():
 
     # Step 6: Generate servo commands
     print("\nSTEP 6: Generating servo commands...")
-    l_cmd = generate_servo_commands(l_path, l_groups, "Left", "G1")
-    r_cmd = generate_servo_commands(r_path, r_groups, "Right", "F7")
+    l_cmd, l_shift = generate_servo_commands(l_path, l_groups, "Left", "G1")
+    r_cmd, r_shift = generate_servo_commands(r_path, r_groups, "Right", "F7")
     print(f"  ✓ Generated {len(l_cmd)} left hand commands")
     print(f"  ✓ Generated {len(r_cmd)} right hand commands")
 
+    # Report total timeline shift (use maximum of the two hands)
+    max_shift = max(l_shift, r_shift)
+    if max_shift > 0:
+        print(f"  ℹ️  Total timeline shift: {max_shift:.2f}s (song now starts at t={max_shift:.2f}s)")
+
     # Step 7: Save all outputs
     print("\nSTEP 7: Saving output files...")
-    save_outputs(l_cmd, r_cmd, l_path, r_path, l_groups, r_groups, split_point, note_groups, args.output)
+    save_outputs(l_cmd, r_cmd, l_path, r_path, l_groups, r_groups, split_point, note_groups, args.output, max_shift)
 
     print("\n" + "=" * 50)
     print("✓ OPTIMIZATION COMPLETE!")

@@ -1,0 +1,15 @@
+0.0:step:F7-D4
+2.000:servo:4
+3.000:servo:4
+4.000:servo:5
+5.000:servo:5
+6.000:servo:4
+16.000:servo:4
+17.000:servo:4
+24.000:servo:4
+25.000:servo:4
+34.000:servo:4
+35.000:servo:4
+36.000:servo:5
+37.000:servo:5
+38.000:servo:4

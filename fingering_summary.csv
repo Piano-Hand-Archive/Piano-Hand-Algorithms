@@ -1,0 +1,7 @@
+Metric,Left Hand,Right Hand,Combined
+Split Point,C4,23,
+Position Changes,0,0,0
+Hardware Limit,10.0 keys/sec,10.0 keys/sec,Enforced
+Movement Penalty,4,4,
+Hand Gap,,,6 keys
+Timeline Shift,1.00s,1.00s,Applied for preparation
