@@ -1,7 +1,13 @@
 Metric,Left Hand,Right Hand,Combined
-Split Point,C4,23,
+Split Point,C3,16,
 Position Changes,0,0,0
+Black Key Notes,0,0,0
+  - Splay Left (-),0,0,0
+  - Splay Right (+),0,0,0
+Extended Splay,0,0,0
 Hardware Limit,10.0 keys/sec,10.0 keys/sec,Enforced
 Movement Penalty,4,4,
 Hand Gap,,,6 keys
+Look-Ahead Steps,,,3
+Dynamic Split,,,Disabled
 Timeline Shift,1.00s,1.00s,Applied for preparation
