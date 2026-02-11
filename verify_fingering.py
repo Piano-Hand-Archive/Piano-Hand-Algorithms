@@ -962,17 +962,17 @@ Verification Checks:
   6. Command Format    - Step-servo pattern is correct
 
 Examples:
-  %(prog)s --dir ./output
-  %(prog)s --dir . --verbose
-  %(prog)s --dir . --speed 15 --gap 8
-  %(prog)s --dir . --no-format-check
+  %(prog)s                              (uses outputs/ by default)
+  %(prog)s --dir outputs --verbose
+  %(prog)s --dir outputs --speed 15 --gap 8
+  %(prog)s --dir outputs --no-format-check
   %(prog)s --self-test
-  %(prog)s --dir . --json-output results.json
+  %(prog)s --dir outputs --json-output results.json
         """
     )
 
-    parser.add_argument('--dir', default='.',
-                        help='Directory containing output files')
+    parser.add_argument('--dir', default='outputs',
+                        help='Directory containing output files (default: outputs)')
     parser.add_argument('--speed', type=float, default=DEFAULT_MAX_KEYS_PER_SECOND,
                         help=f'Max keys per second (default: {DEFAULT_MAX_KEYS_PER_SECOND})')
     parser.add_argument('--gap', type=int, default=DEFAULT_MIN_HAND_GAP,

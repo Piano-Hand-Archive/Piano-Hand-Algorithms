@@ -2316,15 +2316,16 @@ def parse_arguments():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  %(prog)s song.musicxml
-  %(prog)s song.musicxml --speed 15 --gap 8
-  %(prog)s song.musicxml --penalty 10 --transpose
-  %(prog)s song.musicxml --splay-penalty 100 --black-penalty 5
+  %(prog)s                          (lists files in inputs/ and prompts)
+  %(prog)s maryhadlamb.musicxml     (looks in inputs/ automatically)
+  %(prog)s inputs/maryhadlamb.musicxml --speed 15 --gap 8
+  %(prog)s maryhadlamb.musicxml --penalty 10 --transpose
+  %(prog)s maryhadlamb.musicxml --splay-penalty 100 --black-penalty 5
         """
     )
 
     parser.add_argument('file', nargs='?',
-                        help='Input MusicXML file')
+                        help='Input MusicXML file (name or path; looks in inputs/ folder by default)')
     parser.add_argument('--speed', type=float, default=10.0,
                         help='Max keys per second (default: 10)')
     parser.add_argument('--penalty', type=int, default=4,
@@ -2333,8 +2334,8 @@ Examples:
                         help='Min keys between hands (default: 6)')
     parser.add_argument('--transpose', action='store_true',
                         help='Enable auto-transposition to white keys only (legacy mode)')
-    parser.add_argument('--output', default='.',
-                        help='Output directory (default: current directory)')
+    parser.add_argument('--output', default='outputs',
+                        help='Output directory (default: outputs)')
 
     # New splay/black key configuration
     parser.add_argument('--splay-penalty', type=int, default=50,
@@ -2369,11 +2370,41 @@ def main():
     """Main execution function."""
     args = parse_arguments()
 
+    inputs_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'inputs')
+
     if not args.file:
-        print("❌ Error: Please provide a MusicXML file")
-        print("\nUsage: python findOptimalHandPos.py <file.musicxml> [options]")
-        print("Use --help for more information")
-        sys.exit(1)
+        # List available MusicXML files in the inputs/ folder
+        if os.path.isdir(inputs_dir):
+            candidates = sorted(f for f in os.listdir(inputs_dir)
+                                if f.lower().endswith('.musicxml') or f.lower().endswith('.xml'))
+        else:
+            candidates = []
+
+        if not candidates:
+            print("❌ Error: No MusicXML files found in inputs/ and no file argument given.")
+            print("\nUsage: python findOptimalHandPos.py <file.musicxml> [options]")
+            sys.exit(1)
+
+        print("Available input files:")
+        for i, name in enumerate(candidates, 1):
+            print(f"  {i}. {name}")
+        print()
+        choice = input(f"Select a file [1-{len(candidates)}]: ").strip()
+        try:
+            idx = int(choice) - 1
+            if not (0 <= idx < len(candidates)):
+                raise ValueError
+        except ValueError:
+            print("❌ Invalid selection.")
+            sys.exit(1)
+        args.file = os.path.join(inputs_dir, candidates[idx])
+
+    else:
+        # If just a bare filename (no directory component), look in inputs/
+        if not os.path.dirname(args.file) and not os.path.exists(args.file):
+            candidate = os.path.join(inputs_dir, args.file)
+            if os.path.exists(candidate):
+                args.file = candidate
 
     if not os.path.exists(args.file):
         print(f"❌ Error: File '{args.file}' not found")

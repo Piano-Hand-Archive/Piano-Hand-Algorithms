@@ -1,0 +1,722 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Piano Fingering Visualizer</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      font-family: 'Segoe UI', Arial, sans-serif;
+      background: #12121f;
+      color: #e2e8f0;
+      margin: 0;
+      padding: 16px;
+    }
+    h2 { margin: 0 0 12px; font-size: 18px; color: #a0c4ff; }
+
+    /* ── Controls bar ── */
+    .controls {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 10px;
+      padding: 10px 14px;
+      background: #1e1e35;
+      border-radius: 8px;
+      margin-bottom: 10px;
+    }
+    button {
+      background: #2d2d50;
+      color: #e2e8f0;
+      border: 1px solid #4a4a80;
+      padding: 5px 13px;
+      border-radius: 5px;
+      cursor: pointer;
+      font-size: 13px;
+      transition: background 0.15s;
+    }
+    button:hover { background: #4a4a80; }
+    button:disabled { opacity: 0.4; cursor: default; }
+    label.file-btn {
+      background: #2d2d50;
+      color: #a0c4ff;
+      border: 1px solid #4a4a80;
+      padding: 5px 13px;
+      border-radius: 5px;
+      cursor: pointer;
+      font-size: 13px;
+    }
+    label.file-btn:hover { background: #4a4a80; }
+    input[type="file"] { display: none; }
+    .speed-wrap { display: flex; align-items: center; gap: 6px; font-size: 13px; }
+    input[type="range"] { accent-color: #7c83fd; }
+
+    /* ── Timeline ── */
+    .timeline {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 6px 14px;
+      background: #1e1e35;
+      border-radius: 8px;
+      margin-bottom: 10px;
+    }
+    .timeline input[type="range"] { flex: 1; }
+    .timeline span { font-size: 12px; color: #a0aec0; min-width: 70px; }
+    .timeline span:last-child { text-align: right; }
+
+    /* ── Canvas wrapper ── */
+    .piano-wrap {
+      overflow-x: auto;
+      background: #0d0d1a;
+      border-radius: 8px;
+      padding: 12px 10px 18px;
+      margin-bottom: 10px;
+    }
+    canvas { display: block; }
+
+    /* ── Info + legend grid ── */
+    .bottom-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 10px;
+    }
+    .panel {
+      background: #1e1e35;
+      border-radius: 8px;
+      padding: 10px 14px;
+    }
+    .panel h3 {
+      margin: 0 0 8px;
+      font-size: 11px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: #718096;
+    }
+    .panel .row { display: flex; justify-content: space-between; font-size: 13px; margin: 3px 0; }
+    .panel .row span:first-child { color: #718096; }
+    .panel .row strong { color: #e2e8f0; }
+
+    /* Legend panel */
+    .legend-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 5px 14px;
+    }
+    .legend-item { display: flex; align-items: center; gap: 7px; font-size: 12px; }
+    .swatch { width: 14px; height: 14px; border-radius: 3px; flex-shrink: 0; }
+    .swatch.thumb { border: 2px solid #fff; }
+
+    /* Status bar */
+    .status {
+      margin-top: 10px;
+      padding: 6px 12px;
+      background: #1e1e35;
+      border-radius: 6px;
+      font-size: 12px;
+      color: #718096;
+    }
+  </style>
+</head>
+<body>
+
+<h2>🎹 Piano Fingering Visualizer</h2>
+
+<div class="controls">
+  <label class="file-btn" for="csvFile">📂 Load fingering_plan.csv</label>
+  <input type="file" id="csvFile" accept=".csv">
+
+  <button id="btnPrev" onclick="stepBy(-1)" disabled>⏮ Prev</button>
+  <button id="btnPlay" onclick="togglePlay()"  disabled>▶ Play</button>
+  <button id="btnNext" onclick="stepBy(1)"  disabled>Next ⏭</button>
+
+  <div class="speed-wrap">
+    Speed:
+    <input type="range" id="speedSlider" min="0.1" max="5" step="0.1" value="1" style="width:80px">
+    <span id="speedLabel">1.0×</span>
+  </div>
+
+  <button id="btnSound" onclick="toggleSound()" style="min-width:90px">🔊 Sound On</button>
+  <div class="speed-wrap">
+    Vol:
+    <input type="range" id="volSlider" min="0" max="1" step="0.05" value="0.5" style="width:70px"
+           oninput="setVolume(parseFloat(this.value))">
+  </div>
+</div>
+
+<div class="timeline">
+  <span id="tlTime">t = —</span>
+  <input type="range" id="stepSlider" min="0" max="0" value="0" oninput="onSlider(this.value)">
+  <span id="tlStep">— / —</span>
+</div>
+
+<div class="piano-wrap">
+  <canvas id="pianoCanvas"></canvas>
+</div>
+
+<div class="bottom-grid">
+  <!-- Left hand panel -->
+  <div class="panel">
+    <h3>Left Hand</h3>
+    <div class="row"><span>Thumb pos</span><strong id="lThumb">—</strong></div>
+    <div class="row"><span>Note(s)</span><strong id="lNotes">—</strong></div>
+    <div class="row"><span>Finger(s)</span><strong id="lFingers">—</strong></div>
+    <div class="row"><span>Technique</span><strong id="lTech">—</strong></div>
+    <div class="row"><span>Command</span><strong id="lCmd" style="font-family:monospace">—</strong></div>
+  </div>
+
+  <!-- Right hand panel -->
+  <div class="panel">
+    <h3>Right Hand</h3>
+    <div class="row"><span>Thumb pos</span><strong id="rThumb">—</strong></div>
+    <div class="row"><span>Note(s)</span><strong id="rNotes">—</strong></div>
+    <div class="row"><span>Finger(s)</span><strong id="rFingers">—</strong></div>
+    <div class="row"><span>Technique</span><strong id="rTech">—</strong></div>
+    <div class="row"><span>Command</span><strong id="rCmd" style="font-family:monospace">—</strong></div>
+  </div>
+
+  <!-- Legend panel -->
+  <div class="panel">
+    <h3>Legend</h3>
+    <div class="legend-grid">
+      <div class="legend-item"><div class="swatch" style="background:#3a8fd1"></div>L – Normal</div>
+      <div class="legend-item"><div class="swatch" style="background:#27ae60"></div>R – Normal</div>
+      <div class="legend-item"><div class="swatch" style="background:#1a5c8a"></div>L – Black key</div>
+      <div class="legend-item"><div class="swatch" style="background:#1a6b40"></div>R – Black key</div>
+      <div class="legend-item"><div class="swatch" style="background:#8e44ad"></div>L – Splay</div>
+      <div class="legend-item"><div class="swatch" style="background:#c0711f"></div>R – Splay</div>
+      <div class="legend-item"><div class="swatch thumb" style="background:#e74c3c"></div>Thumb (F1)</div>
+      <div class="legend-item"><div class="swatch" style="background:rgba(58,143,209,0.18);border:1px solid #3a8fd1"></div>L span</div>
+      <div class="legend-item"></div>
+      <div class="legend-item"><div class="swatch" style="background:rgba(39,174,96,0.18);border:1px solid #27ae60"></div>R span</div>
+    </div>
+  </div>
+</div>
+
+<div class="status" id="statusBar">Load a fingering_plan.csv to begin.</div>
+
+<script>
+// ═══════════════════════════════════════════════
+// CONSTANTS
+// ═══════════════════════════════════════════════
+const WW   = 16;   // white key width px
+const WH   = 118;  // white key height px
+const BW   = 10;   // black key width px
+const BH   = 74;   // black key height px
+const MRKH = 52;   // marker area above keyboard
+const PAD  = 10;   // horizontal canvas padding
+const NUM_WHITE = 52; // A0 .. C8
+
+// White key positions that have a black key to their RIGHT:
+// idx%7: 0=A(→A#), 1=B(no), 2=C(→C#), 3=D(→D#), 4=E(no), 5=F(→F#), 6=G(→G#)
+const HAS_BLACK_AFTER = new Set([0, 2, 3, 5, 6]);
+
+// Technique → color map
+const CLR = {
+  left: {
+    normal:          '#3a8fd1',
+    black:           '#1a5c8a',
+    splay:           '#8e44ad',
+    thumb:           '#e74c3c',
+  },
+  right: {
+    normal:          '#27ae60',
+    black:           '#1a6b40',
+    splay:           '#c0711f',
+    thumb:           '#e74c3c',
+  },
+};
+
+const SPAN_L  = 'rgba(58,143,209,0.18)';
+const SPAN_R  = 'rgba(39,174,96,0.18)';
+const TRI_L   = '#3a8fd1';
+const TRI_R   = '#27ae60';
+
+// ═══════════════════════════════════════════════
+// STATE
+// ═══════════════════════════════════════════════
+let plan          = [];
+let currentStep   = 0;
+let isPlaying     = false;
+let lastTS        = null;
+let accTime       = 0;
+let lastSoundStep = -1;
+
+// ═══════════════════════════════════════════════
+// AUDIO  (Web Audio API — lazy init on first gesture)
+// ═══════════════════════════════════════════════
+let audioCtx   = null;
+let masterGain = null;
+let soundOn    = true;
+
+// Semitone offsets from A for the 7 white-key positions (A,B,C,D,E,F,G)
+const WKI_MIDI_OFFSET = [0, 2, 3, 5, 7, 8, 10];
+
+function wkiToMidi(idx, isBlack) {
+  if (idx == null || isNaN(idx)) return null;
+  const group = Math.floor(idx / 7);
+  const pos   = idx % 7;
+  return 21 + group * 12 + WKI_MIDI_OFFSET[pos] + (isBlack ? 1 : 0);
+}
+
+function midiToFreq(midi) {
+  return 440 * Math.pow(2, (midi - 69) / 12);
+}
+
+function initAudio() {
+  if (audioCtx) return;
+  audioCtx   = new (window.AudioContext || window.webkitAudioContext)();
+  masterGain = audioCtx.createGain();
+  masterGain.gain.value = parseFloat(document.getElementById('volSlider').value);
+  masterGain.connect(audioCtx.destination);
+}
+
+function setVolume(v) {
+  if (masterGain) masterGain.gain.value = v;
+}
+
+function toggleSound() {
+  soundOn = !soundOn;
+  document.getElementById('btnSound').textContent = soundOn ? '🔊 Sound On' : '🔇 Sound Off';
+}
+
+function playNote(freq, duration, velocity = 0.55) {
+  if (!audioCtx || !soundOn) return;
+  if (audioCtx.state === 'suspended') audioCtx.resume();
+  const now = audioCtx.currentTime;
+
+  // Two oscillators: triangle fundamental + sine 2nd partial (for brightness)
+  const osc1 = audioCtx.createOscillator();
+  const osc2 = audioCtx.createOscillator();
+  const g1   = audioCtx.createGain();
+  const g2   = audioCtx.createGain();
+
+  osc1.type = 'triangle';
+  osc1.frequency.value = freq;
+  osc2.type = 'sine';
+  osc2.frequency.value = freq * 2;
+
+  const atk = 0.006;
+  const dec = 0.15;
+  const sus = velocity * 0.35;
+  const dur = Math.max(0.12, Math.min(duration, 2.5));
+  const rel = Math.min(dur * 0.6, 1.2);
+
+  // Fundamental envelope: attack → decay → sustain → release
+  g1.gain.setValueAtTime(0, now);
+  g1.gain.linearRampToValueAtTime(velocity, now + atk);
+  g1.gain.exponentialRampToValueAtTime(sus, now + atk + dec);
+  g1.gain.setValueAtTime(sus, now + dur - rel);
+  g1.gain.exponentialRampToValueAtTime(0.0001, now + dur);
+
+  // 2nd partial: quick bright transient only
+  g2.gain.setValueAtTime(0, now);
+  g2.gain.linearRampToValueAtTime(velocity * 0.25, now + atk);
+  g2.gain.exponentialRampToValueAtTime(0.0001, now + atk + dec * 0.35);
+
+  osc1.connect(g1); g1.connect(masterGain);
+  osc2.connect(g2); g2.connect(masterGain);
+  osc1.start(now); osc2.start(now);
+  osc1.stop(now + dur + 0.05);
+  osc2.stop(now + dur + 0.05);
+}
+
+function playStep(stepIdx, manual) {
+  if (!soundOn || stepIdx === lastSoundStep) return;
+  lastSoundStep = stepIdx;
+  initAudio();
+
+  const step     = plan[stepIdx];
+  if (!step) return;
+  const nextStep = plan[stepIdx + 1];
+  const duration = manual
+    ? 0.45
+    : (nextStep ? (nextStep.time - step.time) : 0.8);
+
+  const lHits = hitKeys(step.l_thumb, step.l_cmd, true);
+  const rHits = hitKeys(step.r_thumb, step.r_cmd, false);
+  for (const h of [...lHits, ...rHits]) {
+    const midi = wkiToMidi(h.keyIdx, h.isBlack);
+    if (midi == null) continue;
+    playNote(midiToFreq(midi), duration);
+  }
+}
+
+// ═══════════════════════════════════════════════
+// GEOMETRY HELPERS
+// ═══════════════════════════════════════════════
+function whiteX(i)  { return PAD + i * WW; }
+function blackX(i)  { return whiteX(i) + WW - BW / 2; }
+function hasBlack(i){ return HAS_BLACK_AFTER.has(i % 7); }
+
+// ═══════════════════════════════════════════════
+// NOTE NAMING  (white key index → note name)
+// ═══════════════════════════════════════════════
+const N_NAMES = ['A','B','C','D','E','F','G'];
+function idxToName(idx) {
+  if (idx == null || isNaN(idx)) return '—';
+  const pos = idx % 7;
+  const oct = pos <= 1 ? Math.floor(idx / 7) : Math.floor(idx / 7) + 1;
+  return N_NAMES[pos] + oct;
+}
+
+// ═══════════════════════════════════════════════
+// FINGER COMMAND PARSER
+// ═══════════════════════════════════════════════
+function parseCmd(cmd) {
+  if (!cmd || cmd === 'X') return null;
+  const m = cmd.match(/^(\d)([bs])?([+-])?(\d+)?$/);
+  if (!m) return null;
+  const finger = parseInt(m[1]);
+  const tc     = m[2] || '';
+  const dc     = m[3] || '';
+  const dist   = m[4] ? parseInt(m[4]) : 0;
+  const tech   = tc === 'b' ? 'black' : tc === 's' ? 'splay' : 'normal';
+  const dir    = dc === '+' ? 1 : dc === '-' ? -1 : 0;
+  return { finger, tech, dir, dist };
+}
+
+// Returns [{keyIdx, isBlack, finger, tech, isThumb}]
+function hitKeys(thumbIdx, cmdStr, isLeft) {
+  if (thumbIdx == null || !cmdStr) return [];
+  const out = [];
+  for (const sub of cmdStr.split(';')) {
+    if (!sub || sub === 'X') continue;
+    const p = parseCmd(sub);
+    if (!p) continue;
+    let reach = p.finger;
+    if (p.tech === 'splay') {
+      if (p.finger === 1) reach = 1 - p.dist;
+      else if (p.finger === 5) reach = 5 + p.dist;
+    }
+    const ki = isLeft ? (thumbIdx - reach + 1) : (thumbIdx + reach - 1);
+    out.push({ keyIdx: ki, isBlack: p.tech === 'black',
+               finger: p.finger, tech: p.tech, isThumb: p.finger === 1 });
+  }
+  return out;
+}
+
+// ═══════════════════════════════════════════════
+// CSV PARSER
+// ═══════════════════════════════════════════════
+function parseCSV(text) {
+  const lines   = text.replace(/\r/g, '').trim().split('\n');
+  const headers = lines[0].split(',');
+  const col     = h => headers.indexOf(h);
+  const rows    = [];
+  for (let i = 1; i < lines.length; i++) {
+    const c = lines[i].split(',');
+    const intOrNull = v => (v && v.trim()) ? parseInt(v) : null;
+    rows.push({
+      time       : parseFloat(c[col('Time')]),
+      l_notes    : (c[col('L_Notes')]    || '').trim(),
+      l_thumb    : intOrNull(c[col('L_Thumb')]),
+      l_fingers  : (c[col('L_Fingers')] || '').trim(),
+      l_tech     : (c[col('L_Techniques')] || '').trim(),
+      l_cmd      : (c[col('L_Commands')] || '').trim(),
+      r_notes    : (c[col('R_Notes')]    || '').trim(),
+      r_thumb    : intOrNull(c[col('R_Thumb')]),
+      r_fingers  : (c[col('R_Fingers')] || '').trim(),
+      r_tech     : (c[col('R_Techniques')] || '').trim(),
+      r_cmd      : (c[col('R_Commands')] || '').trim(),
+    });
+  }
+  return rows;
+}
+
+// ═══════════════════════════════════════════════
+// DRAWING
+// ═══════════════════════════════════════════════
+function draw(step) {
+  const canvas = document.getElementById('pianoCanvas');
+  const ctx    = canvas.getContext('2d');
+  const cw     = PAD * 2 + NUM_WHITE * WW;
+  const ch     = MRKH + WH + 20;   // extra 20 for note labels
+  canvas.width  = cw;
+  canvas.height = ch;
+
+  // Background
+  ctx.fillStyle = '#0d0d1a';
+  ctx.fillRect(0, 0, cw, ch);
+
+  const ky = MRKH; // top of keys
+
+  // ── Span backgrounds ──
+  if (step) {
+    if (step.l_thumb != null) {
+      const s = Math.max(0, step.l_thumb - 4), e = step.l_thumb;
+      ctx.fillStyle = SPAN_L;
+      ctx.fillRect(whiteX(s), ky, whiteX(e) + WW - whiteX(s), WH);
+    }
+    if (step.r_thumb != null) {
+      const s = step.r_thumb, e = Math.min(NUM_WHITE - 1, step.r_thumb + 4);
+      ctx.fillStyle = SPAN_R;
+      ctx.fillRect(whiteX(s), ky, whiteX(e) + WW - whiteX(s), WH);
+    }
+  }
+
+  // ── Build highlight map ──
+  // key: "W{idx}" or "B{idx}", value: {color, label, isThumb}
+  const hlW = new Map();  // white key highlights
+  const hlB = new Map();  // black key highlights
+
+  if (step) {
+    function addHits(hitsArr, side) {
+      for (const h of hitsArr) {
+        const color = h.isThumb ? CLR[side].thumb : (CLR[side][h.tech] || CLR[side].normal);
+        const entry = { color, label: String(h.finger), isThumb: h.isThumb };
+        if (h.isBlack) {
+          if (!hlB.has(h.keyIdx)) hlB.set(h.keyIdx, entry);
+        } else {
+          if (!hlW.has(h.keyIdx)) hlW.set(h.keyIdx, entry);
+        }
+      }
+    }
+    addHits(hitKeys(step.l_thumb, step.l_cmd, true),  'left');
+    addHits(hitKeys(step.r_thumb, step.r_cmd, false), 'right');
+  }
+
+  // ── Draw white keys ──
+  for (let i = 0; i < NUM_WHITE; i++) {
+    const x  = whiteX(i);
+    const hl = hlW.get(i);
+
+    ctx.fillStyle   = hl ? hl.color : '#f0ede8';
+    ctx.strokeStyle = '#2a2a2a';
+    ctx.lineWidth   = 1;
+    ctx.fillRect  (x + 1, ky,     WW - 2, WH - 1);
+    ctx.strokeRect(x + 1, ky,     WW - 2, WH - 1);
+
+    if (hl) {
+      // Finger number
+      ctx.fillStyle  = 'rgba(255,255,255,0.9)';
+      ctx.font       = 'bold 9px sans-serif';
+      ctx.textAlign  = 'center';
+      ctx.fillText(hl.label, x + WW / 2, ky + WH - 6);
+      // Extra border for thumb
+      if (hl.isThumb) {
+        ctx.strokeStyle = '#fff';
+        ctx.lineWidth   = 2;
+        ctx.strokeRect(x + 2, ky + 1, WW - 4, WH - 3);
+        ctx.lineWidth   = 1;
+      }
+    }
+
+    // C-note label below key
+    if (i % 7 === 2) {
+      ctx.fillStyle  = hl ? '#a0d0ff' : '#4a5568';
+      ctx.font       = '8px sans-serif';
+      ctx.textAlign  = 'center';
+      ctx.fillText(idxToName(i), x + WW / 2, ky + WH + 12);
+    }
+  }
+
+  // ── Draw black keys (on top) ──
+  for (let i = 0; i < NUM_WHITE - 1; i++) {
+    if (!hasBlack(i)) continue;
+    const x  = blackX(i);
+    const hl = hlB.get(i);
+
+    ctx.fillStyle   = hl ? hl.color : '#111';
+    ctx.strokeStyle = '#000';
+    ctx.lineWidth   = 1;
+    ctx.fillRect  (x, ky,     BW, BH);
+    ctx.strokeRect(x, ky,     BW, BH);
+
+    if (hl) {
+      ctx.fillStyle  = 'rgba(255,255,255,0.9)';
+      ctx.font       = 'bold 8px sans-serif';
+      ctx.textAlign  = 'center';
+      ctx.fillText(hl.label, x + BW / 2, ky + BH - 5);
+      if (hl.isThumb) {
+        ctx.strokeStyle = '#fff';
+        ctx.lineWidth   = 1.5;
+        ctx.strokeRect(x + 1, ky + 1, BW - 2, BH - 2);
+        ctx.lineWidth   = 1;
+      }
+    }
+  }
+
+  // ── Thumb position triangles ──
+  if (step) {
+    drawThumb(ctx, step.l_thumb, TRI_L, 'L', ky);
+    drawThumb(ctx, step.r_thumb, TRI_R, 'R', ky);
+  }
+}
+
+function drawThumb(ctx, thumbIdx, color, label, ky) {
+  if (thumbIdx == null) return;
+  const cx  = whiteX(thumbIdx) + WW / 2;
+  const tip = ky - 4;
+  const sz  = 10;
+
+  // Triangle pointing down to the key
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.moveTo(cx - sz, tip - sz * 1.8);
+  ctx.lineTo(cx + sz, tip - sz * 1.8);
+  ctx.lineTo(cx,      tip);
+  ctx.closePath();
+  ctx.fill();
+
+  // Hand label
+  ctx.fillStyle  = '#fff';
+  ctx.font       = 'bold 11px sans-serif';
+  ctx.textAlign  = 'center';
+  ctx.fillText(label, cx, tip - sz * 1.0);
+
+  // Subtle stem line from triangle to top of key
+  ctx.strokeStyle = color;
+  ctx.lineWidth   = 1;
+  ctx.globalAlpha = 0.4;
+  ctx.beginPath();
+  ctx.moveTo(cx, tip);
+  ctx.lineTo(cx, ky);
+  ctx.stroke();
+  ctx.globalAlpha = 1;
+  ctx.lineWidth   = 1;
+}
+
+// ═══════════════════════════════════════════════
+// UI UPDATE
+// ═══════════════════════════════════════════════
+function updateUI(idx) {
+  const step = plan[idx] || null;
+
+  document.getElementById('tlTime').textContent =
+    step ? `t = ${step.time.toFixed(2)}s` : 't = —';
+  document.getElementById('tlStep').textContent =
+    plan.length ? `${idx + 1} / ${plan.length}` : '— / —';
+  document.getElementById('stepSlider').value = idx;
+
+  // Left hand info
+  document.getElementById('lThumb').textContent =
+    (step && step.l_thumb != null) ? `${idxToName(step.l_thumb)} (${step.l_thumb})` : '—';
+  document.getElementById('lNotes').textContent    = (step && step.l_notes)   || '—';
+  document.getElementById('lFingers').textContent  = (step && step.l_fingers) || '—';
+  document.getElementById('lTech').textContent     = (step && step.l_tech)    || '—';
+  document.getElementById('lCmd').textContent      = (step && step.l_cmd)     || '—';
+
+  // Right hand info
+  document.getElementById('rThumb').textContent =
+    (step && step.r_thumb != null) ? `${idxToName(step.r_thumb)} (${step.r_thumb})` : '—';
+  document.getElementById('rNotes').textContent    = (step && step.r_notes)   || '—';
+  document.getElementById('rFingers').textContent  = (step && step.r_fingers) || '—';
+  document.getElementById('rTech').textContent     = (step && step.r_tech)    || '—';
+  document.getElementById('rCmd').textContent      = (step && step.r_cmd)     || '—';
+
+  draw(step);
+
+  // Auto-scroll piano to active region
+  if (step) {
+    const activeIdx = step.l_thumb ?? step.r_thumb;
+    if (activeIdx != null) {
+      const wrap   = document.querySelector('.piano-wrap');
+      const target = whiteX(activeIdx) - wrap.clientWidth / 2 + WW * 2.5;
+      wrap.scrollTo({ left: Math.max(0, target), behavior: 'smooth' });
+    }
+  }
+}
+
+function stepBy(delta) {
+  currentStep = Math.max(0, Math.min(plan.length - 1, currentStep + delta));
+  updateUI(currentStep);
+  playStep(currentStep, true);
+}
+
+function onSlider(val) {
+  currentStep = parseInt(val);
+  updateUI(currentStep);
+  playStep(currentStep, true);
+}
+
+// ═══════════════════════════════════════════════
+// PLAYBACK
+// ═══════════════════════════════════════════════
+function togglePlay() {
+  isPlaying = !isPlaying;
+  document.getElementById('btnPlay').textContent = isPlaying ? '⏸ Pause' : '▶ Play';
+  if (isPlaying) {
+    initAudio();
+    lastSoundStep = -1; // allow replaying current step on resume
+    accTime = (plan[currentStep] || plan[0]).time;
+    lastTS  = null;
+    requestAnimationFrame(animate);
+  }
+}
+
+function animate(ts) {
+  if (!isPlaying) return;
+  if (lastTS == null) lastTS = ts;
+  const elapsed = (ts - lastTS) / 1000;
+  lastTS = ts;
+
+  const speed = parseFloat(document.getElementById('speedSlider').value);
+  accTime += elapsed * speed;
+
+  const prevStep = currentStep;
+  // Advance to the latest step whose time <= accTime
+  while (currentStep < plan.length - 1 && plan[currentStep + 1].time <= accTime)
+    currentStep++;
+
+  updateUI(currentStep);
+
+  if (currentStep !== prevStep)
+    playStep(currentStep, false);
+
+  if (currentStep >= plan.length - 1) {
+    isPlaying = false;
+    document.getElementById('btnPlay').textContent = '▶ Play';
+    return;
+  }
+
+  requestAnimationFrame(animate);
+}
+
+// ═══════════════════════════════════════════════
+// FILE LOADING
+// ═══════════════════════════════════════════════
+document.getElementById('csvFile').addEventListener('change', function (e) {
+  const file = e.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = function (ev) {
+    try {
+      plan = parseCSV(ev.target.result);
+      currentStep = 0;
+      const slider = document.getElementById('stepSlider');
+      slider.max   = plan.length - 1;
+      slider.value = 0;
+      document.getElementById('btnPrev').disabled = false;
+      document.getElementById('btnPlay').disabled = false;
+      document.getElementById('btnNext').disabled = false;
+      document.getElementById('statusBar').textContent =
+        `Loaded ${plan.length} steps from "${file.name}" ` +
+        `(t = ${plan[0].time.toFixed(2)}s … ${plan[plan.length-1].time.toFixed(2)}s)`;
+      updateUI(0);
+    } catch (err) {
+      document.getElementById('statusBar').textContent = 'Error: ' + err.message;
+    }
+  };
+  reader.readAsText(file);
+});
+
+// Speed label update
+document.getElementById('speedSlider').addEventListener('input', function () {
+  document.getElementById('speedLabel').textContent = parseFloat(this.value).toFixed(1) + '×';
+});
+
+// Keyboard shortcuts
+document.addEventListener('keydown', function (e) {
+  if (!plan.length) return;
+  if (e.target.tagName === 'INPUT') return;
+  if (e.code === 'Space')       { e.preventDefault(); togglePlay(); }
+  if (e.code === 'ArrowRight')  { isPlaying = false; document.getElementById('btnPlay').textContent='▶ Play'; stepBy(1); }
+  if (e.code === 'ArrowLeft')   { isPlaying = false; document.getElementById('btnPlay').textContent='▶ Play'; stepBy(-1); }
+});
+
+// Initial blank piano
+draw(null);
+</script>
+</body>
+</html>
