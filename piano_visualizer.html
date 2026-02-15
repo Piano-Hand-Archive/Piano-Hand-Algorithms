@@ -65,6 +65,21 @@
     .timeline span { font-size: 12px; color: #a0aec0; min-width: 70px; }
     .timeline span:last-child { text-align: right; }
 
+    /* ── Score view ── */
+    .score-wrap {
+      background: #0d0d1a;
+      border-radius: 8px;
+      padding: 10px;
+      width: min(75%, 1100px);
+      margin: 0 auto 10px;
+      border: 1px solid #20203a;
+    }
+    #scoreSvg {
+      display: block;
+      width: 100%;
+      height: 170px;
+    }
+
     /* ── Canvas wrapper ── */
     .piano-wrap {
       overflow-x: auto;
@@ -73,7 +88,7 @@
       padding: 12px 10px 18px;
       margin-bottom: 10px;
     }
-    canvas { display: block; }
+    canvas { display: block; margin: 0 auto; }
 
     /* ── Info + legend grid ── */
     .bottom-grid {
@@ -125,6 +140,8 @@
 <div class="controls">
   <label class="file-btn" for="csvFile">📂 Load fingering_plan.csv</label>
   <input type="file" id="csvFile" accept=".csv">
+  <label class="file-btn" for="musicXmlFile">📂 Load .musicxml file</label>
+  <input type="file" id="musicXmlFile" accept=".musicxml,.xml">
 
   <button id="btnPrev" onclick="stepBy(-1)" disabled>⏮ Prev</button>
   <button id="btnPlay" onclick="togglePlay()"  disabled>▶ Play</button>
@@ -148,6 +165,10 @@
   <span id="tlTime">t = —</span>
   <input type="range" id="stepSlider" min="0" max="0" value="0" oninput="onSlider(this.value)">
   <span id="tlStep">— / —</span>
+</div>
+
+<div class="score-wrap">
+  <svg id="scoreSvg" viewBox="0 0 800 170" preserveAspectRatio="none"></svg>
 </div>
 
 <div class="piano-wrap">
@@ -241,6 +262,9 @@ let isPlaying     = false;
 let lastTS        = null;
 let accTime       = 0;
 let lastSoundStep = -1;
+let scoreData     = null;
+let scoreView     = null;
+let stepDivMap    = [];
 
 // ═══════════════════════════════════════════════
 // AUDIO  (Web Audio API — lazy init on first gesture)
@@ -342,6 +366,49 @@ function playStep(stepIdx, manual) {
   }
 }
 
+function getStepMidiSet(stepIdx) {
+  const out = new Set();
+  const step = plan[stepIdx];
+  if (!step) return out;
+  const lHits = hitKeys(step.l_thumb, step.l_cmd, true);
+  const rHits = hitKeys(step.r_thumb, step.r_cmd, false);
+  for (const h of [...lHits, ...rHits]) {
+    const midi = wkiToMidi(h.keyIdx, h.isBlack);
+    if (midi != null) out.add(midi);
+  }
+  return out;
+}
+
+function getStepMidiColorMap(stepIdx) {
+  const out = new Map();
+  const step = plan[stepIdx];
+  if (!step) return out;
+
+  function addHits(hitsArr, side) {
+    for (const h of hitsArr) {
+      const midi = wkiToMidi(h.keyIdx, h.isBlack);
+      if (midi == null) continue;
+      const color = h.isThumb ? CLR[side].thumb : (CLR[side][h.tech] || CLR[side].normal);
+      const existing = out.get(midi);
+      if (!existing || h.isThumb) out.set(midi, color);
+    }
+  }
+
+  addHits(hitKeys(step.l_thumb, step.l_cmd, true), 'left');
+  addHits(hitKeys(step.r_thumb, step.r_cmd, false), 'right');
+  return out;
+}
+
+function darkenHex(hex, factor = 0.58) {
+  const m = String(hex || '').trim().match(/^#([0-9a-f]{6})$/i);
+  if (!m) return '#2563eb';
+  const n = m[1];
+  const r = Math.max(0, Math.min(255, Math.round(parseInt(n.slice(0, 2), 16) * factor)));
+  const g = Math.max(0, Math.min(255, Math.round(parseInt(n.slice(2, 4), 16) * factor)));
+  const b = Math.max(0, Math.min(255, Math.round(parseInt(n.slice(4, 6), 16) * factor)));
+  return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
+}
+
 // ═══════════════════════════════════════════════
 // GEOMETRY HELPERS
 // ═══════════════════════════════════════════════
@@ -358,6 +425,682 @@ function idxToName(idx) {
   const pos = idx % 7;
   const oct = pos <= 1 ? Math.floor(idx / 7) : Math.floor(idx / 7) + 1;
   return N_NAMES[pos] + oct;
+}
+
+function pitchToMidi(step, alter, octave) {
+  const map = { C: 0, D: 2, E: 4, F: 5, G: 7, A: 9, B: 11 };
+  const sem = map[step];
+  if (sem == null || octave == null || isNaN(octave)) return null;
+  return (octave + 1) * 12 + sem + (alter || 0);
+}
+
+function parseMusicXML(text) {
+  const xml = new DOMParser().parseFromString(text, 'application/xml');
+  if (xml.querySelector('parsererror')) throw new Error('Invalid MusicXML file.');
+  const parts = Array.from(xml.querySelectorAll('score-partwise > part, part'))
+    .filter(p => p.querySelector('measure'));
+  if (!parts.length) throw new Error('No <part> found in MusicXML.');
+
+  function parsePart(part) {
+    let divisions = 1;
+    let beats = 4;
+    let beatType = 4;
+    let globalDiv = 0;
+    const measures = [];
+    const notes = [];
+    const mNodes = Array.from(part.children).filter(n => n.tagName === 'measure');
+
+    for (let mi = 0; mi < mNodes.length; mi++) {
+      const measure = mNodes[mi];
+      const measureStart = globalDiv;
+      let pos = 0;
+      let maxPos = 0;
+      let lastStart = 0;
+
+      for (const child of Array.from(measure.children)) {
+        const tag = child.tagName;
+        if (tag === 'attributes') {
+          const d = parseInt(child.querySelector('divisions')?.textContent || '', 10);
+          const tsBeats = parseInt(child.querySelector('time > beats')?.textContent || '', 10);
+          const tsBeatType = parseInt(child.querySelector('time > beat-type')?.textContent || '', 10);
+          if (!isNaN(d) && d > 0) divisions = d;
+          if (!isNaN(tsBeats) && tsBeats > 0) beats = tsBeats;
+          if (!isNaN(tsBeatType) && tsBeatType > 0) beatType = tsBeatType;
+        } else if (tag === 'backup') {
+          const dur = parseInt(child.querySelector('duration')?.textContent || '0', 10);
+          pos = Math.max(0, pos - (isNaN(dur) ? 0 : dur));
+        } else if (tag === 'forward') {
+          const dur = parseInt(child.querySelector('duration')?.textContent || '0', 10);
+          const d = isNaN(dur) ? 0 : dur;
+          pos += d;
+          if (pos > maxPos) maxPos = pos;
+        } else if (tag === 'note') {
+          const hasRest = !!child.querySelector('rest');
+          const hasChord = !!child.querySelector('chord');
+          const isGrace = !!child.querySelector('grace');
+          const durRaw = parseInt(child.querySelector('duration')?.textContent || '0', 10);
+          const dur = isNaN(durRaw) ? 0 : durRaw;
+          const start = hasChord ? lastStart : pos;
+          const type = (child.querySelector('type')?.textContent || '').trim().toLowerCase();
+          const dots = child.querySelectorAll('dot').length;
+          const stem = (child.querySelector('stem')?.textContent || '').trim().toLowerCase();
+          const accidentalTag = (child.querySelector('accidental')?.textContent || '').trim().toLowerCase();
+          const staffRaw = parseInt(child.querySelector('staff')?.textContent || '', 10);
+          const staff = isNaN(staffRaw) ? null : staffRaw;
+          const voice = (child.querySelector('voice')?.textContent || '').trim();
+
+          if (!isGrace) {
+            const step = child.querySelector('pitch > step')?.textContent?.trim();
+            const alterRaw = parseInt(child.querySelector('pitch > alter')?.textContent || '0', 10);
+            const octaveRaw = parseInt(child.querySelector('pitch > octave')?.textContent || '', 10);
+            const midi = pitchToMidi(step, isNaN(alterRaw) ? 0 : alterRaw, octaveRaw);
+            const inferredAcc = isNaN(alterRaw) || alterRaw === 0
+              ? ''
+              : (alterRaw > 0 ? '#'.repeat(alterRaw) : 'b'.repeat(Math.abs(alterRaw)));
+            const accidental = accidentalTag || inferredAcc;
+
+            notes.push({
+              startDiv: measureStart + start,
+              durDiv: Math.max(1, dur),
+              measureIdx: mi,
+              midi: hasRest ? null : midi,
+              isRest: hasRest,
+              type,
+              dots,
+              stem,
+              accidental,
+              staff,
+              voice,
+            });
+          }
+
+          if (!hasChord) {
+            lastStart = start;
+            pos += dur;
+            if (pos > maxPos) maxPos = pos;
+          }
+        }
+      }
+
+      const nominalLen = Math.max(1, Math.round(divisions * beats * (4 / beatType)));
+      const durDiv = Math.max(maxPos, nominalLen);
+      measures.push({
+        index: mi,
+        label: measure.getAttribute('number') || String(mi + 1),
+        startDiv: measureStart,
+        durDiv,
+        endDiv: measureStart + durDiv,
+      });
+      globalDiv += durDiv;
+    }
+
+    return { measures, notes, totalDiv: globalDiv };
+  }
+
+  const parsedParts = parts.map(parsePart).filter(p => p.measures.length);
+  const best = parsedParts.reduce((acc, p) => {
+    if (!acc) return p;
+    if (p.totalDiv !== acc.totalDiv) return p.totalDiv > acc.totalDiv ? p : acc;
+    if (p.notes.length !== acc.notes.length) return p.notes.length > acc.notes.length ? p : acc;
+    return p.measures.length > acc.measures.length ? p : acc;
+  }, null);
+  return best || { measures: [], notes: [], totalDiv: 0 };
+}
+
+function findMeasureIndex(divPos) {
+  if (!scoreData || !scoreData.measures.length) return 0;
+  const measures = scoreData.measures;
+  for (let i = 0; i < measures.length; i++) {
+    if (divPos < measures[i].endDiv) return i;
+  }
+  return measures.length - 1;
+}
+
+function buildStepDivMap() {
+  stepDivMap = [];
+  if (!scoreData || !plan.length) return;
+  if (!scoreData.notes.length) {
+    const n = Math.max(1, plan.length - 1);
+    stepDivMap = plan.map((_, i) => (i / n) * scoreData.totalDiv);
+    return;
+  }
+
+  // Group score notes by onset for matching to each piano timestep.
+  const byStart = new Map();
+  for (const n of scoreData.notes) {
+    if (n.isRest || n.midi == null) continue;
+    if (!byStart.has(n.startDiv)) byStart.set(n.startDiv, new Set());
+    byStart.get(n.startDiv).add(n.midi);
+  }
+  const events = Array.from(byStart.entries())
+    .map(([startDiv, midis]) => ({ startDiv, midis }))
+    .sort((a, b) => a.startDiv - b.startDiv);
+  if (!events.length) {
+    const n = Math.max(1, plan.length - 1);
+    stepDivMap = plan.map((_, i) => (i / n) * scoreData.totalDiv);
+    return;
+  }
+
+  const fallbackAt = i => {
+    const den = Math.max(1, plan.length - 1);
+    return (i / den) * scoreData.totalDiv;
+  };
+
+  const minAdvance = Math.max(0.02, scoreData.totalDiv / Math.max(5000, plan.length * 50));
+  const avgStepDiv = scoreData.totalDiv / Math.max(1, plan.length - 1);
+  const searchRadius = Math.max(24, avgStepDiv * 22);
+  const lookAround = 36;
+  let lastDiv = 0;
+  let lastEventIdx = 0;
+
+  for (let i = 0; i < plan.length; i++) {
+    const midiSet = getStepMidiSet(i);
+    const expected = fallbackAt(i);
+    const expectedIdx = Math.round((i / Math.max(1, plan.length - 1)) * (events.length - 1));
+
+    while (
+      lastEventIdx < events.length - 1 &&
+      events[lastEventIdx + 1].startDiv <= Math.max(lastDiv, expected - searchRadius * 0.9)
+    ) {
+      lastEventIdx++;
+    }
+
+    const startIdx = Math.max(lastEventIdx, expectedIdx - lookAround);
+    const endIdx = Math.min(events.length - 1, expectedIdx + lookAround);
+    let bestIdx = -1;
+    let bestScore = -Infinity;
+    for (let ei = startIdx; ei <= endIdx; ei++) {
+      const ev = events[ei];
+      if (ev.startDiv < lastDiv) continue;
+      if (ev.startDiv > expected + searchRadius && bestIdx >= 0) break;
+
+      let overlap = 0;
+      for (const m of midiSet) if (ev.midis.has(m)) overlap++;
+      const dist = Math.abs(ev.startDiv - expected);
+      const idxDist = Math.abs(ei - expectedIdx);
+      const continuityPenalty = Math.abs(ev.startDiv - lastDiv - avgStepDiv);
+      const score = overlap * 160 - dist * 0.55 - idxDist * 3.2 - continuityPenalty * 0.08;
+      if (score > bestScore) {
+        bestScore = score;
+        bestIdx = ei;
+      }
+    }
+
+    const fallback = expected;
+    let mapped = fallback;
+    if (bestIdx >= 0) {
+      const evDiv = events[bestIdx].startDiv;
+      const ev = events[bestIdx];
+      let overlap = 0;
+      for (const m of midiSet) if (ev.midis.has(m)) overlap++;
+      const snap = overlap > 0 ? 0.95 : 0.68;
+      mapped = evDiv * snap + fallback * (1 - snap);
+      lastEventIdx = bestIdx;
+    }
+
+    mapped = Math.max(mapped, lastDiv + minAdvance);
+    if (mapped > scoreData.totalDiv) mapped = scoreData.totalDiv;
+    stepDivMap.push(mapped);
+    lastDiv = mapped;
+  }
+
+  if (stepDivMap.length) {
+    stepDivMap[0] = Math.max(0, stepDivMap[0]);
+    const lastIdx = stepDivMap.length - 1;
+    stepDivMap[lastIdx] = scoreData.totalDiv;
+
+    // Smooth per-step speed profile to avoid visible playhead stutter in local tempo changes.
+    if (lastIdx > 3) {
+      for (let pass = 0; pass < 2; pass++) {
+        const sm = stepDivMap.slice();
+        for (let i = 1; i < lastIdx; i++) {
+          sm[i] = (stepDivMap[i - 1] + stepDivMap[i] * 2 + stepDivMap[i + 1]) / 4;
+        }
+        stepDivMap = sm;
+      }
+      stepDivMap[0] = 0;
+      stepDivMap[lastIdx] = scoreData.totalDiv;
+    }
+
+    for (let i = 1; i < lastIdx; i++) {
+      const floor = stepDivMap[i - 1] + minAdvance;
+      const ceil = scoreData.totalDiv - (lastIdx - i) * minAdvance;
+      stepDivMap[i] = Math.max(floor, Math.min(stepDivMap[i], ceil));
+    }
+  }
+}
+
+function currentTimeToDiv(timeSec, stepIdx = currentStep) {
+  if (!scoreData) return 0;
+  if (!plan.length || !stepDivMap.length || scoreData.totalDiv <= 0) return 0;
+  if (plan.length === 1) return stepDivMap[0] || 0;
+
+  if (timeSec <= plan[0].time) return stepDivMap[0] || 0;
+  const lastIdx = plan.length - 1;
+  if (timeSec >= plan[lastIdx].time) return stepDivMap[lastIdx] || scoreData.totalDiv;
+
+  const i = Math.max(0, Math.min(lastIdx - 1, stepIdx));
+  const t0 = plan[i].time;
+  const t1 = plan[i + 1].time;
+  const d0 = stepDivMap[i] || 0;
+  const d1 = stepDivMap[i + 1] || d0;
+  const dt = Math.max(0.0001, t1 - t0);
+  const u = Math.max(0, Math.min(1, (timeSec - t0) / dt));
+  return d0 + (d1 - d0) * u;
+}
+
+function midiToY(midi, topY, lineGap, grandGap) {
+  const yMiddleC = topY + (lineGap * 4) + (grandGap / 2);
+  return yMiddleC - (midi - 60) * 2;
+}
+
+function durationFlags(noteType) {
+  const t = (noteType || '').toLowerCase();
+  if (t === 'eighth') return 1;
+  if (t === '16th') return 2;
+  if (t === '32nd') return 3;
+  if (t === '64th') return 4;
+  return 0;
+}
+
+function isHollowHead(noteType) {
+  const t = (noteType || '').toLowerCase();
+  return t === 'half' || t === 'whole' || t === 'breve';
+}
+
+function hasStem(noteType) {
+  const t = (noteType || '').toLowerCase();
+  return !(t === 'whole' || t === 'breve');
+}
+
+function accidentalGlyph(acc) {
+  const a = (acc || '').toLowerCase();
+  if (!a) return '';
+  if (a === 'flat' || a === 'b') return 'b';
+  if (a === 'sharp' || a === '#') return '#';
+  if (a === 'natural') return 'n';
+  if (a === 'double-sharp' || a === '##') return 'x';
+  if (a === 'double-flat' || a === 'bb') return 'bb';
+  if (/^#+$/.test(a)) return '#'.repeat(a.length);
+  if (/^b+$/.test(a)) return 'b'.repeat(a.length);
+  return '';
+}
+
+function drawSimpleRest(ns, svg, noteType, x, y) {
+  const t = (noteType || '').toLowerCase();
+  const out = [];
+  if (t === 'whole' || t === 'half') {
+    const r = document.createElementNS(ns, 'rect');
+    r.setAttribute('x', String(x - 5));
+    r.setAttribute('y', String(t === 'whole' ? y - 1 : y - 7));
+    r.setAttribute('width', '10');
+    r.setAttribute('height', '4');
+    svg.appendChild(r);
+    out.push({ el: r, kind: 'fill' });
+    return out;
+  }
+  if (t === 'eighth' || t === '16th' || t === '32nd') {
+    const stem = document.createElementNS(ns, 'line');
+    stem.setAttribute('x1', String(x));
+    stem.setAttribute('x2', String(x));
+    stem.setAttribute('y1', String(y - 10));
+    stem.setAttribute('y2', String(y + 8));
+    svg.appendChild(stem);
+    out.push({ el: stem, kind: 'stroke' });
+
+    const fCount = t === 'eighth' ? 1 : t === '16th' ? 2 : 3;
+    for (let i = 0; i < fCount; i++) {
+      const c = document.createElementNS(ns, 'path');
+      c.setAttribute('d', `M ${x} ${y - 8 + i * 5} q 8 2 3 9`);
+      c.setAttribute('fill', 'none');
+      svg.appendChild(c);
+      out.push({ el: c, kind: 'stroke' });
+    }
+    return out;
+  }
+  const p = document.createElementNS(ns, 'path');
+  p.setAttribute('d', `M ${x-2} ${y-9} q 5 3 1 8 q -5 5 1 10`);
+  p.setAttribute('fill', 'none');
+  svg.appendChild(p);
+  out.push({ el: p, kind: 'stroke' });
+  return out;
+}
+
+function findSegmentByTime(timeSec) {
+  if (!plan.length) return 0;
+  if (timeSec <= plan[0].time) return 0;
+  let lo = 0;
+  let hi = plan.length - 1;
+  while (lo < hi) {
+    const mid = Math.floor((lo + hi + 1) / 2);
+    if (plan[mid].time <= timeSec) lo = mid;
+    else hi = mid - 1;
+  }
+  return Math.max(0, Math.min(plan.length - 2, lo));
+}
+
+function paintScoreGlyph(node, state, activeFill = null) {
+  const af = activeFill || '#60a5fa';
+  const palette = state === 'active'
+    ? { fill: af, stroke: darkenHex(af), width: '1.2', glow: true }
+    : state === 'past'
+      ? { fill: '#8a8f98', stroke: '#717680', width: '0.7', glow: false }
+      : { fill: '#ffffff', stroke: '#e5e7eb', width: '0.7', glow: false };
+
+  for (const part of node.paintEls) {
+    const el = part.el;
+    if (!el) continue;
+    if (el.tagName === 'text') {
+      el.setAttribute('fill', palette.fill);
+      if (palette.glow) el.setAttribute('filter', 'url(#activeNoteGlow)');
+      else el.removeAttribute('filter');
+      continue;
+    }
+    if (part.kind === 'stroke') {
+      el.setAttribute('fill', 'none');
+      el.setAttribute('stroke', palette.stroke);
+      el.setAttribute('stroke-width', palette.width);
+    } else {
+      el.setAttribute('fill', palette.fill);
+      el.setAttribute('stroke', palette.stroke);
+      el.setAttribute('stroke-width', palette.width);
+    }
+    if (palette.glow) el.setAttribute('filter', 'url(#activeNoteGlow)');
+    else el.removeAttribute('filter');
+  }
+}
+
+function renderScoreWindow(timeSec = 0) {
+  const svg = document.getElementById('scoreSvg');
+  if (!svg) return;
+  svg.innerHTML = '';
+
+  if (!scoreData || !scoreData.measures.length) {
+    const ns = 'http://www.w3.org/2000/svg';
+    const width = svg.clientWidth || 800;
+    const height = 170;
+    svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
+
+    const panel = document.createElementNS(ns, 'rect');
+    panel.setAttribute('x', '18');
+    panel.setAttribute('y', '48');
+    panel.setAttribute('width', String(Math.max(280, width - 36)));
+    panel.setAttribute('height', '72');
+    panel.setAttribute('rx', '10');
+    panel.setAttribute('fill', '#14172a');
+    panel.setAttribute('stroke', '#2f3652');
+    panel.setAttribute('stroke-width', '1');
+    svg.appendChild(panel);
+
+    const title = document.createElementNS(ns, 'text');
+    title.setAttribute('x', '34');
+    title.setAttribute('y', '78');
+    title.setAttribute('fill', '#e2e8f0');
+    title.setAttribute('font-size', '15');
+    title.setAttribute('font-family', "'Segoe UI', Arial, sans-serif");
+    title.textContent = 'Load a .musicxml file to display notation';
+    svg.appendChild(title);
+
+    const hint = document.createElementNS(ns, 'text');
+    hint.setAttribute('x', '34');
+    hint.setAttribute('y', '100');
+    hint.setAttribute('fill', '#94a3b8');
+    hint.setAttribute('font-size', '12');
+    hint.setAttribute('font-family', "'Segoe UI', Arial, sans-serif");
+    hint.textContent = 'Use the file button above to load your score.';
+    svg.appendChild(hint);
+    scoreView = null;
+    return;
+  }
+
+  const ns = 'http://www.w3.org/2000/svg';
+  const width = svg.clientWidth || 800;
+  const height = 170;
+  svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
+
+  const padX = 20;
+  const innerWidth = Math.max(320, width - padX * 2);
+  const measuresVisible = 4;
+  const measureW = innerWidth / measuresVisible;
+  const lineGap = 8;
+  const topY = 35;
+  const grandGap = 50;
+
+  const currentDiv = currentTimeToDiv(timeSec, currentStep);
+  const currentMeasure = findMeasureIndex(currentDiv);
+  const windowStart = Math.floor(currentMeasure / measuresVisible) * measuresVisible;
+  const windowEnd = Math.min(scoreData.measures.length, windowStart + measuresVisible);
+  const windowMeasures = scoreData.measures.slice(windowStart, windowEnd);
+  const windowStartDiv = windowMeasures[0].startDiv;
+  const windowEndDiv = windowMeasures[windowMeasures.length - 1].endDiv;
+
+  const bg = document.createElementNS(ns, 'rect');
+  bg.setAttribute('x', '0');
+  bg.setAttribute('y', '0');
+  bg.setAttribute('width', String(width));
+  bg.setAttribute('height', String(height));
+  bg.setAttribute('fill', '#0d0d1a');
+  svg.appendChild(bg);
+
+  const defs = document.createElementNS(ns, 'defs');
+  const glow = document.createElementNS(ns, 'filter');
+  glow.setAttribute('id', 'activeNoteGlow');
+  glow.setAttribute('x', '-200%');
+  glow.setAttribute('y', '-200%');
+  glow.setAttribute('width', '400%');
+  glow.setAttribute('height', '400%');
+  const blur = document.createElementNS(ns, 'feGaussianBlur');
+  blur.setAttribute('stdDeviation', '1.8');
+  blur.setAttribute('result', 'blur');
+  const merge = document.createElementNS(ns, 'feMerge');
+  const m1 = document.createElementNS(ns, 'feMergeNode');
+  m1.setAttribute('in', 'blur');
+  const m2 = document.createElementNS(ns, 'feMergeNode');
+  m2.setAttribute('in', 'SourceGraphic');
+  merge.appendChild(m1);
+  merge.appendChild(m2);
+  glow.appendChild(blur);
+  glow.appendChild(merge);
+  defs.appendChild(glow);
+  svg.appendChild(defs);
+
+  for (let s = 0; s < 2; s++) {
+    const yBase = topY + s * grandGap;
+    for (let i = 0; i < 5; i++) {
+      const y = yBase + i * lineGap;
+      const ln = document.createElementNS(ns, 'line');
+      ln.setAttribute('x1', String(padX));
+      ln.setAttribute('x2', String(width - padX));
+      ln.setAttribute('y1', String(y));
+      ln.setAttribute('y2', String(y));
+      ln.setAttribute('stroke', '#3a3f58');
+      ln.setAttribute('stroke-width', '1');
+      svg.appendChild(ln);
+    }
+  }
+
+  for (let i = 0; i <= measuresVisible; i++) {
+    const x = padX + i * measureW;
+    const ln = document.createElementNS(ns, 'line');
+    ln.setAttribute('x1', String(x));
+    ln.setAttribute('x2', String(x));
+    ln.setAttribute('y1', String(topY - 2));
+    ln.setAttribute('y2', String(topY + grandGap + lineGap * 4 + 2));
+    ln.setAttribute('stroke', i === 0 ? '#6b7280' : '#4b516f');
+    ln.setAttribute('stroke-width', i % measuresVisible === 0 ? '2' : '1');
+    svg.appendChild(ln);
+
+    if (i < windowMeasures.length) {
+      const lbl = document.createElementNS(ns, 'text');
+      lbl.setAttribute('x', String(x + 4));
+      lbl.setAttribute('y', String(topY - 10));
+      lbl.setAttribute('fill', '#7b849f');
+      lbl.setAttribute('font-size', '11');
+      lbl.textContent = `m${windowMeasures[i].label}`;
+      svg.appendChild(lbl);
+    }
+  }
+
+  const noteNodes = [];
+  const windowDivSpan = Math.max(1, windowEndDiv - windowStartDiv);
+  for (const n of scoreData.notes) {
+    if (n.startDiv < windowStartDiv || n.startDiv >= windowEndDiv) continue;
+    const nx = padX + ((n.startDiv - windowStartDiv) / windowDivSpan) * innerWidth;
+    const inferredStaff = n.staff || ((n.midi != null && n.midi < 60) ? 2 : 1);
+    const staffBaseY = inferredStaff === 2 ? topY + grandGap : topY;
+    const ny = n.isRest
+      ? (staffBaseY + lineGap * 2)
+      : midiToY(n.midi, topY, lineGap, grandGap);
+
+    const paintEls = [];
+    if (n.isRest) {
+      paintEls.push(...drawSimpleRest(ns, svg, n.type, nx, ny));
+    } else {
+      const noteHead = document.createElementNS(ns, 'ellipse');
+      noteHead.setAttribute('cx', String(nx));
+      noteHead.setAttribute('cy', String(ny));
+      noteHead.setAttribute('rx', '5');
+      noteHead.setAttribute('ry', '3.7');
+      noteHead.setAttribute('transform', `rotate(-20 ${nx} ${ny})`);
+      svg.appendChild(noteHead);
+      paintEls.push({ el: noteHead, kind: 'fill' });
+
+      if (isHollowHead(n.type)) {
+        const inner = document.createElementNS(ns, 'ellipse');
+        inner.setAttribute('cx', String(nx));
+        inner.setAttribute('cy', String(ny));
+        inner.setAttribute('rx', '2.8');
+        inner.setAttribute('ry', '1.8');
+        inner.setAttribute('transform', `rotate(-20 ${nx} ${ny})`);
+        inner.setAttribute('fill', '#0d0d1a');
+        inner.setAttribute('stroke', 'none');
+        svg.appendChild(inner);
+      }
+
+      if (hasStem(n.type)) {
+        const stemDir = n.stem === 'down' ? -1 : 1;
+        const sx = stemDir > 0 ? nx + 4.6 : nx - 4.6;
+        const sy0 = ny;
+        const sy1 = ny - stemDir * 24;
+        const stem = document.createElementNS(ns, 'line');
+        stem.setAttribute('x1', String(sx));
+        stem.setAttribute('x2', String(sx));
+        stem.setAttribute('y1', String(sy0));
+        stem.setAttribute('y2', String(sy1));
+        svg.appendChild(stem);
+        paintEls.push({ el: stem, kind: 'stroke' });
+
+        const fCount = durationFlags(n.type);
+        for (let fi = 0; fi < fCount; fi++) {
+          const yOff = fi * 5;
+          const flag = document.createElementNS(ns, 'path');
+          if (stemDir > 0) {
+            flag.setAttribute(
+              'd',
+              `M ${sx} ${sy1 + yOff} q 8 3 3 11 q -4 -1 -3 4`
+            );
+          } else {
+            flag.setAttribute(
+              'd',
+              `M ${sx} ${sy1 - yOff} q -8 -3 -3 -11 q 4 1 3 -4`
+            );
+          }
+          flag.setAttribute('fill', 'none');
+          svg.appendChild(flag);
+          paintEls.push({ el: flag, kind: 'stroke' });
+        }
+      }
+
+      const acc = accidentalGlyph(n.accidental);
+      if (acc) {
+        const at = document.createElementNS(ns, 'text');
+        at.setAttribute('x', String(nx - 15));
+        at.setAttribute('y', String(ny + 3));
+        at.setAttribute('font-size', '12');
+        at.setAttribute('font-family', "'Segoe UI', Arial, sans-serif");
+        at.setAttribute('font-weight', '700');
+        at.textContent = acc;
+        svg.appendChild(at);
+        paintEls.push({ el: at, kind: 'text' });
+      }
+
+      const dotCount = Math.min(2, Math.max(0, n.dots || 0));
+      for (let di = 0; di < dotCount; di++) {
+        const dot = document.createElementNS(ns, 'circle');
+        dot.setAttribute('cx', String(nx + 8 + di * 3.5));
+        dot.setAttribute('cy', String(ny));
+        dot.setAttribute('r', '1.2');
+        svg.appendChild(dot);
+        paintEls.push({ el: dot, kind: 'fill' });
+      }
+    }
+
+    noteNodes.push({
+      paintEls,
+      x: nx,
+      midi: n.midi,
+      startDiv: n.startDiv,
+      endDiv: n.startDiv + n.durDiv,
+      isRest: n.isRest,
+    });
+  }
+
+  const cursorX = padX + ((currentDiv - windowStartDiv) / windowDivSpan) * innerWidth;
+  const cursor = document.createElementNS(ns, 'line');
+  cursor.setAttribute('x1', String(cursorX));
+  cursor.setAttribute('x2', String(cursorX));
+  cursor.setAttribute('y1', String(topY - 16));
+  cursor.setAttribute('y2', String(topY + grandGap + lineGap * 4 + 8));
+  cursor.setAttribute('stroke', '#ffffff');
+  cursor.setAttribute('stroke-width', '2');
+  svg.appendChild(cursor);
+
+  scoreView = {
+    windowStart,
+    windowStartDiv,
+    windowEndDiv,
+    innerWidth,
+    padX,
+    cursorEl: cursor,
+    noteNodes,
+  };
+
+  updateScoreCursor(timeSec, currentStep);
+}
+
+function updateScoreCursor(timeSec, stepIdx = currentStep) {
+  if (!scoreData || !scoreView) return;
+  const segIdx = findSegmentByTime(timeSec);
+  const currentDiv = currentTimeToDiv(timeSec, segIdx);
+  const currentMeasure = findMeasureIndex(currentDiv);
+  const expectedWindowStart = Math.floor(currentMeasure / 4) * 4;
+
+  if (scoreView.windowStart !== expectedWindowStart) {
+    renderScoreWindow(timeSec);
+    return;
+  }
+
+  const divSpan = Math.max(1, scoreView.windowEndDiv - scoreView.windowStartDiv);
+  const rel = (currentDiv - scoreView.windowStartDiv) / divSpan;
+  const cursorX = scoreView.padX + rel * scoreView.innerWidth;
+  scoreView.cursorEl.setAttribute('x1', String(cursorX));
+  scoreView.cursorEl.setAttribute('x2', String(cursorX));
+  const activeMidis = getStepMidiSet(segIdx);
+  const activeMidiColors = getStepMidiColorMap(segIdx);
+
+  for (const n of scoreView.noteNodes) {
+    const isActive = !n.isRest &&
+      activeMidis.has(n.midi) &&
+      currentDiv >= n.startDiv &&
+      currentDiv <= n.endDiv;
+    if (isActive) {
+      paintScoreGlyph(n, 'active', activeMidiColors.get(n.midi));
+    } else if (n.x < cursorX) {
+      paintScoreGlyph(n, 'past');
+    } else {
+      paintScoreGlyph(n, 'future');
+    }
+  }
 }
 
 // ═══════════════════════════════════════════════
@@ -580,7 +1323,7 @@ function drawThumb(ctx, thumbIdx, color, label, ky) {
 // ═══════════════════════════════════════════════
 // UI UPDATE
 // ═══════════════════════════════════════════════
-function updateUI(idx) {
+function updateUI(idx, scoreTimeSec = null, shouldAutoScroll = true) {
   const step = plan[idx] || null;
 
   document.getElementById('tlTime').textContent =
@@ -606,13 +1349,16 @@ function updateUI(idx) {
   document.getElementById('rCmd').textContent      = (step && step.r_cmd)     || '—';
 
   draw(step);
+  const tForScore = (scoreTimeSec != null) ? scoreTimeSec : (step ? step.time : 0);
+  updateScoreCursor(tForScore, idx);
 
   // Auto-scroll piano to active region
-  if (step) {
-    const activeIdx = step.l_thumb ?? step.r_thumb;
-    if (activeIdx != null) {
+  if (step && shouldAutoScroll) {
+    const thumbIdx = [step.l_thumb, step.r_thumb].filter(v => v != null);
+    if (thumbIdx.length) {
+      const activeIdx = thumbIdx.reduce((a, b) => a + b, 0) / thumbIdx.length;
       const wrap   = document.querySelector('.piano-wrap');
-      const target = whiteX(activeIdx) - wrap.clientWidth / 2 + WW * 2.5;
+      const target = (whiteX(activeIdx) + WW / 2) - wrap.clientWidth / 2;
       wrap.scrollTo({ left: Math.max(0, target), behavior: 'smooth' });
     }
   }
@@ -634,6 +1380,10 @@ function onSlider(val) {
 // PLAYBACK
 // ═══════════════════════════════════════════════
 function togglePlay() {
+  if (!isPlaying && plan.length && currentStep >= plan.length - 1) {
+    currentStep = 0;
+    updateUI(0, plan[0]?.time || 0, true);
+  }
   isPlaying = !isPlaying;
   document.getElementById('btnPlay').textContent = isPlaying ? '⏸ Pause' : '▶ Play';
   if (isPlaying) {
@@ -659,7 +1409,7 @@ function animate(ts) {
   while (currentStep < plan.length - 1 && plan[currentStep + 1].time <= accTime)
     currentStep++;
 
-  updateUI(currentStep);
+  updateUI(currentStep, accTime, currentStep !== prevStep);
 
   if (currentStep !== prevStep)
     playStep(currentStep, false);
@@ -693,9 +1443,32 @@ document.getElementById('csvFile').addEventListener('change', function (e) {
       document.getElementById('statusBar').textContent =
         `Loaded ${plan.length} steps from "${file.name}" ` +
         `(t = ${plan[0].time.toFixed(2)}s … ${plan[plan.length-1].time.toFixed(2)}s)`;
+      buildStepDivMap();
       updateUI(0);
+      updateScoreCursor(0, 0);
     } catch (err) {
       document.getElementById('statusBar').textContent = 'Error: ' + err.message;
+    }
+  };
+  reader.readAsText(file);
+});
+
+document.getElementById('musicXmlFile').addEventListener('change', function (e) {
+  const file = e.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = function (ev) {
+    try {
+      scoreData = parseMusicXML(ev.target.result);
+      buildStepDivMap();
+      renderScoreWindow(plan[currentStep]?.time || 0);
+      const msg = `Loaded MusicXML "${file.name}" (${scoreData.measures.length} measures).`;
+      document.getElementById('statusBar').textContent = msg;
+    } catch (err) {
+      scoreData = null;
+      scoreView = null;
+      renderScoreWindow(0);
+      document.getElementById('statusBar').textContent = 'MusicXML error: ' + err.message;
     }
   };
   reader.readAsText(file);
@@ -717,6 +1490,7 @@ document.addEventListener('keydown', function (e) {
 
 // Initial blank piano
 draw(null);
+renderScoreWindow(0);
 </script>
 </body>
 </html>
