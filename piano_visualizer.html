@@ -3,168 +3,310 @@
 <head>
   <meta charset="UTF-8">
   <title>Piano Fingering Visualizer</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;500;600;700&family=Barlow:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
   <style>
-    * { box-sizing: border-box; }
-    body {
-      font-family: 'Segoe UI', Arial, sans-serif;
-      background: #12121f;
-      color: #e2e8f0;
-      margin: 0;
-      padding: 16px;
+    :root {
+      --bg:       #0c0c0c;
+      --s1:       #131313;
+      --s2:       #181818;
+      --line:     #1e1e1e;
+      --line-2:   #2a2a2a;
+      --text:     #d6d6d6;
+      --dim:      #4a4a4a;
+      --dim2:     #666;
+      --accent:   #39e5a8;
+      --left:     #5599ff;
+      --right:    #ff7055;
+      --thumb:    #39e5a8;
     }
-    h2 { margin: 0 0 12px; font-size: 18px; color: #a0c4ff; }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Barlow', system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      padding: 24px 28px;
+      min-height: 100vh;
+    }
+
+    @keyframes in {
+      from { opacity: 0; transform: translateY(6px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+    body > * { animation: in 0.4s ease both; }
+    body > *:nth-child(1) { animation-delay: 0.00s; }
+    body > *:nth-child(2) { animation-delay: 0.05s; }
+    body > *:nth-child(3) { animation-delay: 0.10s; }
+    body > *:nth-child(4) { animation-delay: 0.15s; }
+    body > *:nth-child(5) { animation-delay: 0.20s; }
+    body > *:nth-child(6) { animation-delay: 0.26s; }
+    body > *:nth-child(7) { animation-delay: 0.32s; }
+
+    /* ── Header ── */
+    .app-header {
+      display: flex;
+      align-items: center;
+      gap: 20px;
+      margin-bottom: 18px;
+      padding-bottom: 16px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    h1 {
+      font-family: 'Syne', sans-serif;
+      font-size: 22px;
+      font-weight: 700;
+      color: var(--text);
+      letter-spacing: -0.01em;
+      line-height: 1;
+    }
+
+    h1 em {
+      font-style: normal;
+      color: var(--accent);
+    }
+
+    .app-subtitle {
+      font-family: 'Barlow', sans-serif;
+      font-size: 10px;
+      font-weight: 500;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: var(--dim);
+    }
 
     /* ── Controls bar ── */
     .controls {
       display: flex;
       align-items: center;
       flex-wrap: wrap;
-      gap: 10px;
+      gap: 6px;
       padding: 10px 14px;
-      background: #1e1e35;
-      border-radius: 8px;
-      margin-bottom: 10px;
+      background: var(--s1);
+      border: 1px solid var(--line);
+      margin-bottom: 8px;
     }
+
+    .ctrl-sep {
+      width: 1px;
+      height: 18px;
+      background: var(--line-2);
+      margin: 0 4px;
+      flex-shrink: 0;
+    }
+
     button {
-      background: #2d2d50;
-      color: #e2e8f0;
-      border: 1px solid #4a4a80;
-      padding: 5px 13px;
-      border-radius: 5px;
+      background: transparent;
+      color: var(--dim2);
+      border: 1px solid var(--line-2);
+      padding: 4px 12px;
       cursor: pointer;
-      font-size: 13px;
-      transition: background 0.15s;
+      font-family: 'Barlow', sans-serif;
+      font-size: 12px;
+      font-weight: 500;
+      letter-spacing: 0.04em;
+      transition: color 0.12s, border-color 0.12s;
     }
-    button:hover { background: #4a4a80; }
-    button:disabled { opacity: 0.4; cursor: default; }
+    button:hover  { color: var(--text); border-color: var(--dim); }
+    button:disabled { opacity: 0.2; cursor: default; }
+
     label.file-btn {
-      background: #2d2d50;
-      color: #a0c4ff;
-      border: 1px solid #4a4a80;
-      padding: 5px 13px;
-      border-radius: 5px;
+      background: transparent;
+      color: var(--accent);
+      border: 1px solid var(--accent);
+      padding: 4px 12px;
       cursor: pointer;
-      font-size: 13px;
+      font-family: 'Barlow', sans-serif;
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      transition: background 0.12s;
+      opacity: 0.85;
     }
-    label.file-btn:hover { background: #4a4a80; }
+    label.file-btn:hover { background: rgba(57,229,168,0.08); opacity: 1; }
     input[type="file"] { display: none; }
-    .speed-wrap { display: flex; align-items: center; gap: 6px; font-size: 13px; }
-    input[type="range"] { accent-color: #7c83fd; }
+
+    .speed-wrap {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-family: 'Barlow', sans-serif;
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--dim);
+    }
+
+    input[type="range"] { accent-color: var(--accent); cursor: pointer; }
 
     /* ── Timeline ── */
     .timeline {
       display: flex;
       align-items: center;
-      gap: 10px;
-      padding: 6px 14px;
-      background: #1e1e35;
-      border-radius: 8px;
-      margin-bottom: 10px;
+      gap: 12px;
+      padding: 8px 14px;
+      background: var(--s1);
+      border: 1px solid var(--line);
+      margin-bottom: 8px;
     }
     .timeline input[type="range"] { flex: 1; }
-    .timeline span { font-size: 12px; color: #a0aec0; min-width: 70px; }
+    .timeline span {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11px;
+      color: var(--dim);
+      min-width: 72px;
+    }
     .timeline span:last-child { text-align: right; }
 
     /* ── Score view ── */
     .score-wrap {
-      background: #0d0d1a;
-      border-radius: 8px;
+      background: #080808;
+      border: 1px solid var(--line);
       padding: 10px;
       width: min(75%, 1100px);
-      margin: 0 auto 10px;
-      border: 1px solid #20203a;
+      margin: 0 auto 8px;
     }
-    #scoreSvg {
-      display: block;
-      width: 100%;
-      height: 170px;
-    }
+    #scoreSvg { display: block; width: 100%; height: 170px; }
 
     /* ── Canvas wrapper ── */
     .piano-wrap {
       overflow-x: auto;
-      background: #0d0d1a;
-      border-radius: 8px;
-      padding: 12px 10px 18px;
-      margin-bottom: 10px;
+      background: #080808;
+      border: 1px solid var(--line);
+      padding: 12px 10px 16px;
+      margin-bottom: 8px;
     }
     canvas { display: block; margin: 0 auto; }
 
-    /* ── Info + legend grid ── */
+    /* ── Bottom grid ── */
     .bottom-grid {
       display: grid;
       grid-template-columns: 1fr 1fr 1fr;
-      gap: 10px;
+      gap: 8px;
     }
-    .panel {
-      background: #1e1e35;
-      border-radius: 8px;
-      padding: 10px 14px;
-    }
-    .panel h3 {
-      margin: 0 0 8px;
-      font-size: 11px;
-      letter-spacing: 0.08em;
-      text-transform: uppercase;
-      color: #718096;
-    }
-    .panel .row { display: flex; justify-content: space-between; font-size: 13px; margin: 3px 0; }
-    .panel .row span:first-child { color: #718096; }
-    .panel .row strong { color: #e2e8f0; }
 
-    /* Legend panel */
+    .panel {
+      background: var(--s1);
+      border: 1px solid var(--line);
+      padding: 14px 16px;
+    }
+
+    .panel h3 {
+      font-family: 'Syne', sans-serif;
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--dim2);
+      border-bottom: 1px solid var(--line);
+      padding-bottom: 8px;
+      margin-bottom: 10px;
+    }
+
+    .panel .row {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      padding: 4px 0;
+      border-bottom: 1px solid var(--line);
+    }
+    .panel .row:last-child { border-bottom: none; }
+
+    .panel .row span:first-child {
+      font-family: 'Barlow', sans-serif;
+      font-size: 9px;
+      font-weight: 600;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: var(--dim);
+    }
+    .panel .row strong {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11px;
+      font-weight: 400;
+      color: var(--text);
+    }
+
+    /* Legend */
     .legend-grid {
       display: grid;
       grid-template-columns: 1fr 1fr;
-      gap: 5px 14px;
+      gap: 7px 16px;
     }
-    .legend-item { display: flex; align-items: center; gap: 7px; font-size: 12px; }
-    .swatch { width: 14px; height: 14px; border-radius: 3px; flex-shrink: 0; }
-    .swatch.thumb { border: 2px solid #fff; }
+    .legend-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-family: 'Barlow', sans-serif;
+      font-size: 11px;
+      font-weight: 400;
+      color: var(--dim2);
+    }
+    .swatch {
+      width: 10px;
+      height: 10px;
+      flex-shrink: 0;
+    }
+    .swatch.thumb { outline: 1px solid var(--text); outline-offset: 1px; }
 
     /* Status bar */
     .status {
-      margin-top: 10px;
-      padding: 6px 12px;
-      background: #1e1e35;
-      border-radius: 6px;
-      font-size: 12px;
-      color: #718096;
+      margin-top: 8px;
+      padding: 7px 14px;
+      background: var(--s1);
+      border: 1px solid var(--line);
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 10px;
+      color: var(--dim);
     }
   </style>
 </head>
 <body>
 
-<h2>🎹 Piano Fingering Visualizer</h2>
+<header class="app-header">
+  <h1>Piano Fingering <em>Visualizer</em></h1>
+  <span class="app-subtitle">Hand Position Analysis</span>
+</header>
 
 <div class="controls">
-  <label class="file-btn" for="csvFile">📂 Load fingering_plan.csv</label>
+  <label class="file-btn" for="csvFile">Load CSV</label>
   <input type="file" id="csvFile" accept=".csv">
-  <label class="file-btn" for="musicXmlFile">📂 Load .musicxml file</label>
+  <label class="file-btn" for="musicXmlFile">Load MusicXML</label>
   <input type="file" id="musicXmlFile" accept=".musicxml,.xml">
 
-  <button id="btnPrev" onclick="stepBy(-1)" disabled>⏮ Prev</button>
-  <button id="btnPlay" onclick="togglePlay()"  disabled>▶ Play</button>
-  <button id="btnNext" onclick="stepBy(1)"  disabled>Next ⏭</button>
+  <div class="ctrl-sep"></div>
+
+  <button id="btnPrev" onclick="stepBy(-1)" disabled>&#171; Prev</button>
+  <button id="btnPlay" onclick="togglePlay()" disabled>&#9654; Play</button>
+  <button id="btnNext" onclick="stepBy(1)"  disabled>Next &#187;</button>
+
+  <div class="ctrl-sep"></div>
 
   <div class="speed-wrap">
-    Speed:
+    Speed
     <input type="range" id="speedSlider" min="0.1" max="5" step="0.1" value="1" style="width:80px">
-    <span id="speedLabel">1.0×</span>
+    <span id="speedLabel">1.0&#215;</span>
   </div>
 
-  <button id="btnSound" onclick="toggleSound()" style="min-width:90px">🔊 Sound On</button>
+  <div class="ctrl-sep"></div>
+
+  <button id="btnSound" onclick="toggleSound()" style="min-width:90px">&#9834; Sound On</button>
   <div class="speed-wrap">
-    Vol:
+    Vol
     <input type="range" id="volSlider" min="0" max="1" step="0.05" value="0.5" style="width:70px"
            oninput="setVolume(parseFloat(this.value))">
   </div>
 </div>
 
 <div class="timeline">
-  <span id="tlTime">t = —</span>
+  <span id="tlTime">t = &#8212;</span>
   <input type="range" id="stepSlider" min="0" max="0" value="0" oninput="onSlider(this.value)">
-  <span id="tlStep">— / —</span>
+  <span id="tlStep">&#8212; / &#8212;</span>
 </div>
 
 <div class="score-wrap">
@@ -179,37 +321,37 @@
   <!-- Left hand panel -->
   <div class="panel">
     <h3>Left Hand</h3>
-    <div class="row"><span>Thumb pos</span><strong id="lThumb">—</strong></div>
-    <div class="row"><span>Note(s)</span><strong id="lNotes">—</strong></div>
-    <div class="row"><span>Finger(s)</span><strong id="lFingers">—</strong></div>
-    <div class="row"><span>Technique</span><strong id="lTech">—</strong></div>
-    <div class="row"><span>Command</span><strong id="lCmd" style="font-family:monospace">—</strong></div>
+    <div class="row"><span>Thumb pos</span><strong id="lThumb">&#8212;</strong></div>
+    <div class="row"><span>Note(s)</span><strong id="lNotes">&#8212;</strong></div>
+    <div class="row"><span>Finger(s)</span><strong id="lFingers">&#8212;</strong></div>
+    <div class="row"><span>Technique</span><strong id="lTech">&#8212;</strong></div>
+    <div class="row"><span>Command</span><strong id="lCmd">&#8212;</strong></div>
   </div>
 
   <!-- Right hand panel -->
   <div class="panel">
     <h3>Right Hand</h3>
-    <div class="row"><span>Thumb pos</span><strong id="rThumb">—</strong></div>
-    <div class="row"><span>Note(s)</span><strong id="rNotes">—</strong></div>
-    <div class="row"><span>Finger(s)</span><strong id="rFingers">—</strong></div>
-    <div class="row"><span>Technique</span><strong id="rTech">—</strong></div>
-    <div class="row"><span>Command</span><strong id="rCmd" style="font-family:monospace">—</strong></div>
+    <div class="row"><span>Thumb pos</span><strong id="rThumb">&#8212;</strong></div>
+    <div class="row"><span>Note(s)</span><strong id="rNotes">&#8212;</strong></div>
+    <div class="row"><span>Finger(s)</span><strong id="rFingers">&#8212;</strong></div>
+    <div class="row"><span>Technique</span><strong id="rTech">&#8212;</strong></div>
+    <div class="row"><span>Command</span><strong id="rCmd">&#8212;</strong></div>
   </div>
 
   <!-- Legend panel -->
   <div class="panel">
     <h3>Legend</h3>
     <div class="legend-grid">
-      <div class="legend-item"><div class="swatch" style="background:#3a8fd1"></div>L – Normal</div>
-      <div class="legend-item"><div class="swatch" style="background:#27ae60"></div>R – Normal</div>
-      <div class="legend-item"><div class="swatch" style="background:#1a5c8a"></div>L – Black key</div>
-      <div class="legend-item"><div class="swatch" style="background:#1a6b40"></div>R – Black key</div>
-      <div class="legend-item"><div class="swatch" style="background:#8e44ad"></div>L – Splay</div>
-      <div class="legend-item"><div class="swatch" style="background:#c0711f"></div>R – Splay</div>
-      <div class="legend-item"><div class="swatch thumb" style="background:#e74c3c"></div>Thumb (F1)</div>
-      <div class="legend-item"><div class="swatch" style="background:rgba(58,143,209,0.18);border:1px solid #3a8fd1"></div>L span</div>
+      <div class="legend-item"><div class="swatch" style="background:#5599ff"></div>L &#8211; Normal</div>
+      <div class="legend-item"><div class="swatch" style="background:#ff7055"></div>R &#8211; Normal</div>
+      <div class="legend-item"><div class="swatch" style="background:#2255aa"></div>L &#8211; Black key</div>
+      <div class="legend-item"><div class="swatch" style="background:#aa3322"></div>R &#8211; Black key</div>
+      <div class="legend-item"><div class="swatch" style="background:#3377cc"></div>L &#8211; Splay</div>
+      <div class="legend-item"><div class="swatch" style="background:#cc4433"></div>R &#8211; Splay</div>
+      <div class="legend-item"><div class="swatch thumb" style="background:#39e5a8"></div>Thumb (F1)</div>
+      <div class="legend-item"><div class="swatch" style="background:rgba(85,153,255,0.18);outline:1px solid #5599ff"></div>L span</div>
       <div class="legend-item"></div>
-      <div class="legend-item"><div class="swatch" style="background:rgba(39,174,96,0.18);border:1px solid #27ae60"></div>R span</div>
+      <div class="legend-item"><div class="swatch" style="background:rgba(255,112,85,0.18);outline:1px solid #ff7055"></div>R span</div>
     </div>
   </div>
 </div>
@@ -235,23 +377,23 @@ const HAS_BLACK_AFTER = new Set([0, 2, 3, 5, 6]);
 // Technique → color map
 const CLR = {
   left: {
-    normal:          '#3a8fd1',
-    black:           '#1a5c8a',
-    splay:           '#8e44ad',
-    thumb:           '#e74c3c',
+    normal:          '#5599ff',
+    black:           '#2255aa',
+    splay:           '#3377cc',
+    thumb:           '#39e5a8',
   },
   right: {
-    normal:          '#27ae60',
-    black:           '#1a6b40',
-    splay:           '#c0711f',
-    thumb:           '#e74c3c',
+    normal:          '#ff7055',
+    black:           '#aa3322',
+    splay:           '#cc4433',
+    thumb:           '#39e5a8',
   },
 };
 
-const SPAN_L  = 'rgba(58,143,209,0.18)';
-const SPAN_R  = 'rgba(39,174,96,0.18)';
-const TRI_L   = '#3a8fd1';
-const TRI_R   = '#27ae60';
+const SPAN_L  = 'rgba(85,153,255,0.12)';
+const SPAN_R  = 'rgba(255,112,85,0.12)';
+const TRI_L   = '#5599ff';
+const TRI_R   = '#ff7055';
 
 // ═══════════════════════════════════════════════
 // STATE
@@ -301,7 +443,7 @@ function setVolume(v) {
 
 function toggleSound() {
   soundOn = !soundOn;
-  document.getElementById('btnSound').textContent = soundOn ? '🔊 Sound On' : '🔇 Sound Off';
+  document.getElementById('btnSound').textContent = soundOn ? '\u266a Sound On' : '\u266a Sound Off';
 }
 
 function playNote(freq, duration, velocity = 0.55) {
@@ -780,12 +922,12 @@ function findSegmentByTime(timeSec) {
 }
 
 function paintScoreGlyph(node, state, activeFill = null) {
-  const af = activeFill || '#60a5fa';
+  const af = activeFill || '#39e5a8';
   const palette = state === 'active'
     ? { fill: af, stroke: darkenHex(af), width: '1.2', glow: true }
     : state === 'past'
-      ? { fill: '#8a8f98', stroke: '#717680', width: '0.7', glow: false }
-      : { fill: '#ffffff', stroke: '#e5e7eb', width: '0.7', glow: false };
+      ? { fill: '#333', stroke: '#2a2a2a', width: '0.7', glow: false }
+      : { fill: '#555', stroke: '#444', width: '0.7', glow: false };
 
   for (const part of node.paintEls) {
     const el = part.el;
@@ -826,28 +968,29 @@ function renderScoreWindow(timeSec = 0) {
     panel.setAttribute('y', '48');
     panel.setAttribute('width', String(Math.max(280, width - 36)));
     panel.setAttribute('height', '72');
-    panel.setAttribute('rx', '10');
-    panel.setAttribute('fill', '#14172a');
-    panel.setAttribute('stroke', '#2f3652');
+    panel.setAttribute('rx', '0');
+    panel.setAttribute('fill', '#0e0e0e');
+    panel.setAttribute('stroke', '#1e1e1e');
     panel.setAttribute('stroke-width', '1');
     svg.appendChild(panel);
 
     const title = document.createElementNS(ns, 'text');
     title.setAttribute('x', '34');
-    title.setAttribute('y', '78');
-    title.setAttribute('fill', '#e2e8f0');
-    title.setAttribute('font-size', '15');
-    title.setAttribute('font-family', "'Segoe UI', Arial, sans-serif");
+    title.setAttribute('y', '80');
+    title.setAttribute('fill', '#555');
+    title.setAttribute('font-size', '13');
+    title.setAttribute('font-family', "'Barlow', sans-serif");
     title.textContent = 'Load a .musicxml file to display notation';
     svg.appendChild(title);
 
     const hint = document.createElementNS(ns, 'text');
     hint.setAttribute('x', '34');
     hint.setAttribute('y', '100');
-    hint.setAttribute('fill', '#94a3b8');
-    hint.setAttribute('font-size', '12');
-    hint.setAttribute('font-family', "'Segoe UI', Arial, sans-serif");
-    hint.textContent = 'Use the file button above to load your score.';
+    hint.setAttribute('fill', '#333');
+    hint.setAttribute('font-size', '10');
+    hint.setAttribute('font-family', "'Barlow', sans-serif");
+    hint.setAttribute('letter-spacing', '0.1');
+    hint.textContent = 'Use the Load MusicXML button above.';
     svg.appendChild(hint);
     scoreView = null;
     return;
@@ -879,7 +1022,7 @@ function renderScoreWindow(timeSec = 0) {
   bg.setAttribute('y', '0');
   bg.setAttribute('width', String(width));
   bg.setAttribute('height', String(height));
-  bg.setAttribute('fill', '#0d0d1a');
+  bg.setAttribute('fill', '#080808');
   svg.appendChild(bg);
 
   const defs = document.createElementNS(ns, 'defs');
@@ -913,7 +1056,7 @@ function renderScoreWindow(timeSec = 0) {
       ln.setAttribute('x2', String(width - padX));
       ln.setAttribute('y1', String(y));
       ln.setAttribute('y2', String(y));
-      ln.setAttribute('stroke', '#3a3f58');
+      ln.setAttribute('stroke', '#222');
       ln.setAttribute('stroke-width', '1');
       svg.appendChild(ln);
     }
@@ -926,16 +1069,18 @@ function renderScoreWindow(timeSec = 0) {
     ln.setAttribute('x2', String(x));
     ln.setAttribute('y1', String(topY - 2));
     ln.setAttribute('y2', String(topY + grandGap + lineGap * 4 + 2));
-    ln.setAttribute('stroke', i === 0 ? '#6b7280' : '#4b516f');
-    ln.setAttribute('stroke-width', i % measuresVisible === 0 ? '2' : '1');
+    ln.setAttribute('stroke', i === 0 ? '#3a3a3a' : '#252525');
+    ln.setAttribute('stroke-width', i % measuresVisible === 0 ? '1.5' : '1');
     svg.appendChild(ln);
 
     if (i < windowMeasures.length) {
       const lbl = document.createElementNS(ns, 'text');
       lbl.setAttribute('x', String(x + 4));
       lbl.setAttribute('y', String(topY - 10));
-      lbl.setAttribute('fill', '#7b849f');
-      lbl.setAttribute('font-size', '11');
+      lbl.setAttribute('fill', '#3a3a3a');
+      lbl.setAttribute('font-size', '10');
+      lbl.setAttribute('font-family', "'Barlow', sans-serif");
+      lbl.setAttribute('letter-spacing', '0.05');
       lbl.textContent = `m${windowMeasures[i].label}`;
       svg.appendChild(lbl);
     }
@@ -972,7 +1117,7 @@ function renderScoreWindow(timeSec = 0) {
         inner.setAttribute('rx', '2.8');
         inner.setAttribute('ry', '1.8');
         inner.setAttribute('transform', `rotate(-20 ${nx} ${ny})`);
-        inner.setAttribute('fill', '#0d0d1a');
+        inner.setAttribute('fill', '#080808');
         inner.setAttribute('stroke', 'none');
         svg.appendChild(inner);
       }
@@ -1017,7 +1162,7 @@ function renderScoreWindow(timeSec = 0) {
         at.setAttribute('x', String(nx - 15));
         at.setAttribute('y', String(ny + 3));
         at.setAttribute('font-size', '12');
-        at.setAttribute('font-family', "'Segoe UI', Arial, sans-serif");
+        at.setAttribute('font-family', "'Barlow', sans-serif");
         at.setAttribute('font-weight', '700');
         at.textContent = acc;
         svg.appendChild(at);
@@ -1051,8 +1196,9 @@ function renderScoreWindow(timeSec = 0) {
   cursor.setAttribute('x2', String(cursorX));
   cursor.setAttribute('y1', String(topY - 16));
   cursor.setAttribute('y2', String(topY + grandGap + lineGap * 4 + 8));
-  cursor.setAttribute('stroke', '#ffffff');
-  cursor.setAttribute('stroke-width', '2');
+  cursor.setAttribute('stroke', '#39e5a8');
+  cursor.setAttribute('stroke-width', '1');
+  cursor.setAttribute('opacity', '0.7');
   svg.appendChild(cursor);
 
   scoreView = {
@@ -1179,7 +1325,7 @@ function draw(step) {
   canvas.height = ch;
 
   // Background
-  ctx.fillStyle = '#0d0d1a';
+  ctx.fillStyle = '#080808';
   ctx.fillRect(0, 0, cw, ch);
 
   const ky = MRKH; // top of keys
@@ -1199,9 +1345,8 @@ function draw(step) {
   }
 
   // ── Build highlight map ──
-  // key: "W{idx}" or "B{idx}", value: {color, label, isThumb}
-  const hlW = new Map();  // white key highlights
-  const hlB = new Map();  // black key highlights
+  const hlW = new Map();
+  const hlB = new Map();
 
   if (step) {
     function addHits(hitsArr, side) {
@@ -1224,19 +1369,17 @@ function draw(step) {
     const x  = whiteX(i);
     const hl = hlW.get(i);
 
-    ctx.fillStyle   = hl ? hl.color : '#f0ede8';
-    ctx.strokeStyle = '#2a2a2a';
+    ctx.fillStyle   = hl ? hl.color : '#e8e8e8';
+    ctx.strokeStyle = '#1a1a1a';
     ctx.lineWidth   = 1;
     ctx.fillRect  (x + 1, ky,     WW - 2, WH - 1);
     ctx.strokeRect(x + 1, ky,     WW - 2, WH - 1);
 
     if (hl) {
-      // Finger number
-      ctx.fillStyle  = 'rgba(255,255,255,0.9)';
+      ctx.fillStyle  = 'rgba(255,255,255,0.92)';
       ctx.font       = 'bold 9px sans-serif';
       ctx.textAlign  = 'center';
       ctx.fillText(hl.label, x + WW / 2, ky + WH - 6);
-      // Extra border for thumb
       if (hl.isThumb) {
         ctx.strokeStyle = '#fff';
         ctx.lineWidth   = 2;
@@ -1247,7 +1390,7 @@ function draw(step) {
 
     // C-note label below key
     if (i % 7 === 2) {
-      ctx.fillStyle  = hl ? '#a0d0ff' : '#4a5568';
+      ctx.fillStyle  = hl ? '#39e5a8' : '#2e2e2e';
       ctx.font       = '8px sans-serif';
       ctx.textAlign  = 'center';
       ctx.fillText(idxToName(i), x + WW / 2, ky + WH + 12);
@@ -1261,13 +1404,13 @@ function draw(step) {
     const hl = hlB.get(i);
 
     ctx.fillStyle   = hl ? hl.color : '#111';
-    ctx.strokeStyle = '#000';
+    ctx.strokeStyle = '#050505';
     ctx.lineWidth   = 1;
     ctx.fillRect  (x, ky,     BW, BH);
     ctx.strokeRect(x, ky,     BW, BH);
 
     if (hl) {
-      ctx.fillStyle  = 'rgba(255,255,255,0.9)';
+      ctx.fillStyle  = 'rgba(255,255,255,0.92)';
       ctx.font       = 'bold 8px sans-serif';
       ctx.textAlign  = 'center';
       ctx.fillText(hl.label, x + BW / 2, ky + BH - 5);
@@ -1327,26 +1470,26 @@ function updateUI(idx, scoreTimeSec = null, shouldAutoScroll = true) {
   const step = plan[idx] || null;
 
   document.getElementById('tlTime').textContent =
-    step ? `t = ${step.time.toFixed(2)}s` : 't = —';
+    step ? `t = ${step.time.toFixed(2)}s` : 't = \u2014';
   document.getElementById('tlStep').textContent =
-    plan.length ? `${idx + 1} / ${plan.length}` : '— / —';
+    plan.length ? `${idx + 1} / ${plan.length}` : '\u2014 / \u2014';
   document.getElementById('stepSlider').value = idx;
 
   // Left hand info
   document.getElementById('lThumb').textContent =
-    (step && step.l_thumb != null) ? `${idxToName(step.l_thumb)} (${step.l_thumb})` : '—';
-  document.getElementById('lNotes').textContent    = (step && step.l_notes)   || '—';
-  document.getElementById('lFingers').textContent  = (step && step.l_fingers) || '—';
-  document.getElementById('lTech').textContent     = (step && step.l_tech)    || '—';
-  document.getElementById('lCmd').textContent      = (step && step.l_cmd)     || '—';
+    (step && step.l_thumb != null) ? `${idxToName(step.l_thumb)} (${step.l_thumb})` : '\u2014';
+  document.getElementById('lNotes').textContent    = (step && step.l_notes)   || '\u2014';
+  document.getElementById('lFingers').textContent  = (step && step.l_fingers) || '\u2014';
+  document.getElementById('lTech').textContent     = (step && step.l_tech)    || '\u2014';
+  document.getElementById('lCmd').textContent      = (step && step.l_cmd)     || '\u2014';
 
   // Right hand info
   document.getElementById('rThumb').textContent =
-    (step && step.r_thumb != null) ? `${idxToName(step.r_thumb)} (${step.r_thumb})` : '—';
-  document.getElementById('rNotes').textContent    = (step && step.r_notes)   || '—';
-  document.getElementById('rFingers').textContent  = (step && step.r_fingers) || '—';
-  document.getElementById('rTech').textContent     = (step && step.r_tech)    || '—';
-  document.getElementById('rCmd').textContent      = (step && step.r_cmd)     || '—';
+    (step && step.r_thumb != null) ? `${idxToName(step.r_thumb)} (${step.r_thumb})` : '\u2014';
+  document.getElementById('rNotes').textContent    = (step && step.r_notes)   || '\u2014';
+  document.getElementById('rFingers').textContent  = (step && step.r_fingers) || '\u2014';
+  document.getElementById('rTech').textContent     = (step && step.r_tech)    || '\u2014';
+  document.getElementById('rCmd').textContent      = (step && step.r_cmd)     || '\u2014';
 
   draw(step);
   const tForScore = (scoreTimeSec != null) ? scoreTimeSec : (step ? step.time : 0);
@@ -1385,7 +1528,7 @@ function togglePlay() {
     updateUI(0, plan[0]?.time || 0, true);
   }
   isPlaying = !isPlaying;
-  document.getElementById('btnPlay').textContent = isPlaying ? '⏸ Pause' : '▶ Play';
+  document.getElementById('btnPlay').textContent = isPlaying ? '\u23f8 Pause' : '\u25b6 Play';
   if (isPlaying) {
     initAudio();
     lastSoundStep = -1; // allow replaying current step on resume
@@ -1416,7 +1559,7 @@ function animate(ts) {
 
   if (currentStep >= plan.length - 1) {
     isPlaying = false;
-    document.getElementById('btnPlay').textContent = '▶ Play';
+    document.getElementById('btnPlay').textContent = '\u25b6 Play';
     return;
   }
 
@@ -1441,8 +1584,8 @@ document.getElementById('csvFile').addEventListener('change', function (e) {
       document.getElementById('btnPlay').disabled = false;
       document.getElementById('btnNext').disabled = false;
       document.getElementById('statusBar').textContent =
-        `Loaded ${plan.length} steps from "${file.name}" ` +
-        `(t = ${plan[0].time.toFixed(2)}s … ${plan[plan.length-1].time.toFixed(2)}s)`;
+        `Loaded ${plan.length} steps from \u201c${file.name}\u201d ` +
+        `(t = ${plan[0].time.toFixed(2)}s \u2026 ${plan[plan.length-1].time.toFixed(2)}s)`;
       buildStepDivMap();
       updateUI(0);
       updateScoreCursor(0, 0);
@@ -1462,7 +1605,7 @@ document.getElementById('musicXmlFile').addEventListener('change', function (e) 
       scoreData = parseMusicXML(ev.target.result);
       buildStepDivMap();
       renderScoreWindow(plan[currentStep]?.time || 0);
-      const msg = `Loaded MusicXML "${file.name}" (${scoreData.measures.length} measures).`;
+      const msg = `Loaded MusicXML \u201c${file.name}\u201d (${scoreData.measures.length} measures).`;
       document.getElementById('statusBar').textContent = msg;
     } catch (err) {
       scoreData = null;
@@ -1476,7 +1619,7 @@ document.getElementById('musicXmlFile').addEventListener('change', function (e) 
 
 // Speed label update
 document.getElementById('speedSlider').addEventListener('input', function () {
-  document.getElementById('speedLabel').textContent = parseFloat(this.value).toFixed(1) + '×';
+  document.getElementById('speedLabel').textContent = parseFloat(this.value).toFixed(1) + '\u00d7';
 });
 
 // Keyboard shortcuts
@@ -1484,8 +1627,8 @@ document.addEventListener('keydown', function (e) {
   if (!plan.length) return;
   if (e.target.tagName === 'INPUT') return;
   if (e.code === 'Space')       { e.preventDefault(); togglePlay(); }
-  if (e.code === 'ArrowRight')  { isPlaying = false; document.getElementById('btnPlay').textContent='▶ Play'; stepBy(1); }
-  if (e.code === 'ArrowLeft')   { isPlaying = false; document.getElementById('btnPlay').textContent='▶ Play'; stepBy(-1); }
+  if (e.code === 'ArrowRight')  { isPlaying = false; document.getElementById('btnPlay').textContent='\u25b6 Play'; stepBy(1); }
+  if (e.code === 'ArrowLeft')   { isPlaying = false; document.getElementById('btnPlay').textContent='\u25b6 Play'; stepBy(-1); }
 });
 
 // Initial blank piano
