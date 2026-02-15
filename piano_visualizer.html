@@ -13,9 +13,9 @@
       --s2:       #181818;
       --line:     #1e1e1e;
       --line-2:   #2a2a2a;
-      --text:     #d6d6d6;
-      --dim:      #4a4a4a;
-      --dim2:     #666;
+      --text:     #f2f2f2;
+      --dim:      #c4c4c4;
+      --dim2:     #d8d8d8;
       --accent:   #39e5a8;
       --left:     #5599ff;
       --right:    #ff7055;
@@ -922,12 +922,12 @@ function findSegmentByTime(timeSec) {
 }
 
 function paintScoreGlyph(node, state, activeFill = null) {
-  const af = activeFill || '#39e5a8';
+  const af = '#ffffff';
   const palette = state === 'active'
-    ? { fill: af, stroke: darkenHex(af), width: '1.2', glow: true }
+    ? { fill: af, stroke: '#ffffff', width: '1.2', glow: true }
     : state === 'past'
-      ? { fill: '#333', stroke: '#2a2a2a', width: '0.7', glow: false }
-      : { fill: '#555', stroke: '#444', width: '0.7', glow: false };
+      ? { fill: '#ffffff', stroke: '#ffffff', width: '0.9', glow: false }
+      : { fill: '#ffffff', stroke: '#ffffff', width: '0.9', glow: false };
 
   for (const part of node.paintEls) {
     const el = part.el;
@@ -977,7 +977,7 @@ function renderScoreWindow(timeSec = 0) {
     const title = document.createElementNS(ns, 'text');
     title.setAttribute('x', '34');
     title.setAttribute('y', '80');
-    title.setAttribute('fill', '#555');
+    title.setAttribute('fill', '#a8a8a8');
     title.setAttribute('font-size', '13');
     title.setAttribute('font-family', "'Barlow', sans-serif");
     title.textContent = 'Load a .musicxml file to display notation';
@@ -986,7 +986,7 @@ function renderScoreWindow(timeSec = 0) {
     const hint = document.createElementNS(ns, 'text');
     hint.setAttribute('x', '34');
     hint.setAttribute('y', '100');
-    hint.setAttribute('fill', '#333');
+    hint.setAttribute('fill', '#8f8f8f');
     hint.setAttribute('font-size', '10');
     hint.setAttribute('font-family', "'Barlow', sans-serif");
     hint.setAttribute('letter-spacing', '0.1');
@@ -1056,7 +1056,7 @@ function renderScoreWindow(timeSec = 0) {
       ln.setAttribute('x2', String(width - padX));
       ln.setAttribute('y1', String(y));
       ln.setAttribute('y2', String(y));
-      ln.setAttribute('stroke', '#222');
+      ln.setAttribute('stroke', '#8f8f8f');
       ln.setAttribute('stroke-width', '1');
       svg.appendChild(ln);
     }
@@ -1069,7 +1069,7 @@ function renderScoreWindow(timeSec = 0) {
     ln.setAttribute('x2', String(x));
     ln.setAttribute('y1', String(topY - 2));
     ln.setAttribute('y2', String(topY + grandGap + lineGap * 4 + 2));
-    ln.setAttribute('stroke', i === 0 ? '#3a3a3a' : '#252525');
+    ln.setAttribute('stroke', '#8f8f8f');
     ln.setAttribute('stroke-width', i % measuresVisible === 0 ? '1.5' : '1');
     svg.appendChild(ln);
 
@@ -1077,7 +1077,7 @@ function renderScoreWindow(timeSec = 0) {
       const lbl = document.createElementNS(ns, 'text');
       lbl.setAttribute('x', String(x + 4));
       lbl.setAttribute('y', String(topY - 10));
-      lbl.setAttribute('fill', '#3a3a3a');
+      lbl.setAttribute('fill', '#a8a8a8');
       lbl.setAttribute('font-size', '10');
       lbl.setAttribute('font-family', "'Barlow', sans-serif");
       lbl.setAttribute('letter-spacing', '0.05');
@@ -1196,8 +1196,8 @@ function renderScoreWindow(timeSec = 0) {
   cursor.setAttribute('x2', String(cursorX));
   cursor.setAttribute('y1', String(topY - 16));
   cursor.setAttribute('y2', String(topY + grandGap + lineGap * 4 + 8));
-  cursor.setAttribute('stroke', '#39e5a8');
-  cursor.setAttribute('stroke-width', '1');
+  cursor.setAttribute('stroke', '#9a9a9a');
+  cursor.setAttribute('stroke-width', '1.5');
   cursor.setAttribute('opacity', '0.7');
   svg.appendChild(cursor);
 
