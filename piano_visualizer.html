@@ -171,7 +171,7 @@
       width: min(75%, 1100px);
       margin: 0 auto 8px;
     }
-    #scoreSvg { display: block; width: 100%; height: 170px; }
+    #scoreSvg { display: block; width: 100%; height: 170px; cursor: pointer; }
 
     /* ── Canvas wrapper ── */
     .piano-wrap {
@@ -264,6 +264,77 @@
       font-size: 10px;
       color: var(--dim);
     }
+
+    /* Active button state */
+    button.btn-active { color: var(--accent); border-color: var(--accent); }
+
+    /* Jump-to-measure row */
+    .jump-wrap {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 5px 14px;
+      background: var(--s1);
+      border: 1px solid var(--line);
+      border-top: none;
+      margin-bottom: 8px;
+    }
+    .jump-wrap label {
+      font-family: 'Barlow', sans-serif;
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--dim);
+    }
+    .jump-wrap input[type="text"] {
+      background: var(--s2);
+      border: 1px solid var(--line-2);
+      color: var(--text);
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11px;
+      padding: 2px 7px;
+      width: 52px;
+    }
+    .jump-wrap input[type="text"]:focus { outline: none; border-color: var(--accent); }
+
+    /* Technique distribution bars */
+    .tech-section { margin-top: 10px; }
+    .tech-bar-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin: 5px 0;
+    }
+    .tech-bar-label {
+      font-family: 'Barlow', sans-serif;
+      font-size: 9px;
+      font-weight: 600;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--dim);
+      width: 52px;
+      flex-shrink: 0;
+    }
+    .tech-bar-track {
+      flex: 1;
+      height: 3px;
+      background: var(--line-2);
+      position: relative;
+    }
+    .tech-bar-fill {
+      position: absolute;
+      left: 0; top: 0; height: 100%;
+      transition: width 0.4s ease;
+    }
+    .tech-bar-pct {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 9px;
+      color: var(--dim);
+      width: 30px;
+      text-align: right;
+      flex-shrink: 0;
+    }
   </style>
 </head>
 <body>
@@ -301,6 +372,16 @@
     <input type="range" id="volSlider" min="0" max="1" step="0.05" value="0.5" style="width:70px"
            oninput="setVolume(parseFloat(this.value))">
   </div>
+
+  <div class="ctrl-sep"></div>
+
+  <button id="btnLoopToggle" onclick="toggleLoop()" title="Toggle loop (L)">Loop</button>
+  <button id="btnLoopIn"  onclick="setLoopIn()"  title="Set loop in point"  disabled>[ In</button>
+  <button id="btnLoopOut" onclick="setLoopOut()" title="Set loop out point" disabled>Out ]</button>
+
+  <div class="ctrl-sep"></div>
+
+  <button onclick="exportPng()" title="Save piano as PNG">Export PNG</button>
 </div>
 
 <div class="timeline">
@@ -311,6 +392,11 @@
 
 <div class="score-wrap">
   <svg id="scoreSvg" viewBox="0 0 800 170" preserveAspectRatio="none"></svg>
+</div>
+<div class="jump-wrap" id="jumpWrap" style="width:min(75%,1100px);margin-left:auto;margin-right:auto;">
+  <label for="jumpInput">Jump to measure</label>
+  <input type="text" id="jumpInput" placeholder="m1" title="Type a measure number and press Enter">
+  <span id="jumpMsg" style="font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--dim)"></span>
 </div>
 
 <div class="piano-wrap">
@@ -338,20 +424,20 @@
     <div class="row"><span>Command</span><strong id="rCmd">&#8212;</strong></div>
   </div>
 
-  <!-- Legend panel -->
+  <!-- Technique distribution panel -->
   <div class="panel">
-    <h3>Legend</h3>
-    <div class="legend-grid">
-      <div class="legend-item"><div class="swatch" style="background:#5599ff"></div>L &#8211; Normal</div>
-      <div class="legend-item"><div class="swatch" style="background:#ff7055"></div>R &#8211; Normal</div>
-      <div class="legend-item"><div class="swatch" style="background:#2255aa"></div>L &#8211; Black key</div>
-      <div class="legend-item"><div class="swatch" style="background:#aa3322"></div>R &#8211; Black key</div>
-      <div class="legend-item"><div class="swatch" style="background:#3377cc"></div>L &#8211; Splay</div>
-      <div class="legend-item"><div class="swatch" style="background:#cc4433"></div>R &#8211; Splay</div>
-      <div class="legend-item"><div class="swatch thumb" style="background:#39e5a8"></div>Thumb (F1)</div>
-      <div class="legend-item"><div class="swatch" style="background:rgba(85,153,255,0.18);outline:1px solid #5599ff"></div>L span</div>
-      <div class="legend-item"></div>
-      <div class="legend-item"><div class="swatch" style="background:rgba(255,112,85,0.18);outline:1px solid #ff7055"></div>R span</div>
+    <h3>Techniques</h3>
+    <div class="legend-grid" style="margin-bottom:8px">
+      <div class="legend-item"><div class="swatch" style="background:#5599ff"></div>L Normal</div>
+      <div class="legend-item"><div class="swatch" style="background:#ff7055"></div>R Normal</div>
+      <div class="legend-item"><div class="swatch" style="background:#2255aa"></div>L Black</div>
+      <div class="legend-item"><div class="swatch" style="background:#aa3322"></div>R Black</div>
+      <div class="legend-item"><div class="swatch" style="background:#3377cc"></div>L Splay</div>
+      <div class="legend-item"><div class="swatch" style="background:#cc4433"></div>R Splay</div>
+      <div class="legend-item"><div class="swatch thumb" style="background:#39e5a8"></div>Thumb</div>
+    </div>
+    <div class="tech-section" id="techChart">
+      <div style="font-family:'Barlow',sans-serif;font-size:9px;letter-spacing:0.1em;text-transform:uppercase;color:var(--dim)">Load a CSV to see distribution</div>
     </div>
   </div>
 </div>
@@ -407,6 +493,11 @@ let lastSoundStep = -1;
 let scoreData     = null;
 let scoreView     = null;
 let stepDivMap    = [];
+
+// Loop region
+let loopOn    = false;
+let loopStart = 0;
+let loopEnd   = 0;
 
 // ═══════════════════════════════════════════════
 // AUDIO  (Web Audio API — lazy init on first gesture)
@@ -1101,6 +1192,28 @@ function renderScoreWindow(timeSec = 0) {
     if (n.isRest) {
       paintEls.push(...drawSimpleRest(ns, svg, n.type, nx, ny));
     } else {
+      // Ledger lines for notes outside the staff
+      const staffBottom = staffBaseY + 4 * lineGap;
+      const LW = 14; // ledger line half-width each side
+      if (ny < staffBaseY - lineGap / 2) {
+        for (let ly = staffBaseY - lineGap; ly >= ny - lineGap / 2; ly -= lineGap) {
+          const ll = document.createElementNS(ns, 'line');
+          ll.setAttribute('x1', String(nx - LW)); ll.setAttribute('x2', String(nx + LW));
+          ll.setAttribute('y1', String(ly));       ll.setAttribute('y2', String(ly));
+          svg.appendChild(ll);
+          paintEls.push({ el: ll, kind: 'stroke' });
+        }
+      }
+      if (ny > staffBottom + lineGap / 2) {
+        for (let ly = staffBottom + lineGap; ly <= ny + lineGap / 2; ly += lineGap) {
+          const ll = document.createElementNS(ns, 'line');
+          ll.setAttribute('x1', String(nx - LW)); ll.setAttribute('x2', String(nx + LW));
+          ll.setAttribute('y1', String(ly));       ll.setAttribute('y2', String(ly));
+          svg.appendChild(ll);
+          paintEls.push({ el: ll, kind: 'stroke' });
+        }
+      }
+
       const noteHead = document.createElementNS(ns, 'ellipse');
       noteHead.setAttribute('cx', String(nx));
       noteHead.setAttribute('cy', String(ny));
@@ -1344,7 +1457,39 @@ function draw(step) {
     }
   }
 
-  // ── Build highlight map ──
+  // ── Ghost notes (next 2 lookahead steps) ──
+  function buildHitMap(s) {
+    const w = new Map(), b = new Map();
+    if (!s) return { w, b };
+    function addH(hits, side) {
+      for (const h of hits) {
+        const col = h.isThumb ? CLR[side].thumb : (CLR[side][h.tech] || CLR[side].normal);
+        if (h.isBlack) { if (!b.has(h.keyIdx)) b.set(h.keyIdx, col); }
+        else            { if (!w.has(h.keyIdx)) w.set(h.keyIdx, col); }
+      }
+    }
+    addH(hitKeys(s.l_thumb, s.l_cmd, true),  'left');
+    addH(hitKeys(s.r_thumb, s.r_cmd, false), 'right');
+    return { w, b };
+  }
+
+  for (const [offset, alpha] of [[2, 0.12], [1, 0.26]]) {
+    const gs = plan[currentStep + offset];
+    if (!gs) continue;
+    const { w: gW, b: gB } = buildHitMap(gs);
+    ctx.globalAlpha = alpha;
+    for (const [ki, col] of gW) {
+      ctx.fillStyle = col;
+      ctx.fillRect(whiteX(ki) + 1, ky, WW - 2, WH - 1);
+    }
+    for (const [ki, col] of gB) {
+      ctx.fillStyle = col;
+      ctx.fillRect(blackX(ki), ky, BW, BH);
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  // ── Build current highlight map ──
   const hlW = new Map();
   const hlB = new Map();
 
@@ -1368,22 +1513,23 @@ function draw(step) {
   for (let i = 0; i < NUM_WHITE; i++) {
     const x  = whiteX(i);
     const hl = hlW.get(i);
+    const press = hl ? 3 : 0;  // pressed keys drawn 3px lower
 
     ctx.fillStyle   = hl ? hl.color : '#e8e8e8';
     ctx.strokeStyle = '#1a1a1a';
     ctx.lineWidth   = 1;
-    ctx.fillRect  (x + 1, ky,     WW - 2, WH - 1);
-    ctx.strokeRect(x + 1, ky,     WW - 2, WH - 1);
+    ctx.fillRect  (x + 1, ky + press, WW - 2, WH - 1 - press);
+    ctx.strokeRect(x + 1, ky + press, WW - 2, WH - 1 - press);
 
     if (hl) {
       ctx.fillStyle  = 'rgba(255,255,255,0.92)';
       ctx.font       = 'bold 9px sans-serif';
       ctx.textAlign  = 'center';
-      ctx.fillText(hl.label, x + WW / 2, ky + WH - 6);
+      ctx.fillText(hl.label, x + WW / 2, ky + press + WH - 9);
       if (hl.isThumb) {
         ctx.strokeStyle = '#fff';
         ctx.lineWidth   = 2;
-        ctx.strokeRect(x + 2, ky + 1, WW - 4, WH - 3);
+        ctx.strokeRect(x + 2, ky + press + 1, WW - 4, WH - 4 - press);
         ctx.lineWidth   = 1;
       }
     }
@@ -1402,22 +1548,23 @@ function draw(step) {
     if (!hasBlack(i)) continue;
     const x  = blackX(i);
     const hl = hlB.get(i);
+    const press = hl ? 3 : 0;
 
     ctx.fillStyle   = hl ? hl.color : '#111';
     ctx.strokeStyle = '#050505';
     ctx.lineWidth   = 1;
-    ctx.fillRect  (x, ky,     BW, BH);
-    ctx.strokeRect(x, ky,     BW, BH);
+    ctx.fillRect  (x, ky + press, BW, BH - press);
+    ctx.strokeRect(x, ky + press, BW, BH - press);
 
     if (hl) {
       ctx.fillStyle  = 'rgba(255,255,255,0.92)';
       ctx.font       = 'bold 8px sans-serif';
       ctx.textAlign  = 'center';
-      ctx.fillText(hl.label, x + BW / 2, ky + BH - 5);
+      ctx.fillText(hl.label, x + BW / 2, ky + press + BH - 8);
       if (hl.isThumb) {
         ctx.strokeStyle = '#fff';
         ctx.lineWidth   = 1.5;
-        ctx.strokeRect(x + 1, ky + 1, BW - 2, BH - 2);
+        ctx.strokeRect(x + 1, ky + press + 1, BW - 2, BH - 2 - press);
         ctx.lineWidth   = 1;
       }
     }
@@ -1425,12 +1572,17 @@ function draw(step) {
 
   // ── Thumb position triangles ──
   if (step) {
-    drawThumb(ctx, step.l_thumb, TRI_L, 'L', ky);
-    drawThumb(ctx, step.r_thumb, TRI_R, 'R', ky);
+    const prevStep = plan[currentStep - 1] || null;
+    const lShift = prevStep && prevStep.l_thumb != null && step.l_thumb != null
+      ? Math.abs(step.l_thumb - prevStep.l_thumb) : 0;
+    const rShift = prevStep && prevStep.r_thumb != null && step.r_thumb != null
+      ? Math.abs(step.r_thumb - prevStep.r_thumb) : 0;
+    drawThumb(ctx, step.l_thumb, lShift >= 5 ? '#ffaa00' : TRI_L, 'L', ky, lShift >= 5);
+    drawThumb(ctx, step.r_thumb, rShift >= 5 ? '#ffaa00' : TRI_R, 'R', ky, rShift >= 5);
   }
 }
 
-function drawThumb(ctx, thumbIdx, color, label, ky) {
+function drawThumb(ctx, thumbIdx, color, label, ky, isWarning = false) {
   if (thumbIdx == null) return;
   const cx  = whiteX(thumbIdx) + WW / 2;
   const tip = ky - 4;
@@ -1445,11 +1597,25 @@ function drawThumb(ctx, thumbIdx, color, label, ky) {
   ctx.closePath();
   ctx.fill();
 
-  // Hand label
-  ctx.fillStyle  = '#fff';
+  // Warning ring when large position shift
+  if (isWarning) {
+    ctx.strokeStyle = '#ffaa00';
+    ctx.lineWidth   = 1.5;
+    ctx.globalAlpha = 0.7;
+    ctx.beginPath();
+    ctx.moveTo(cx - sz - 2, tip - sz * 1.8 - 2);
+    ctx.lineTo(cx + sz + 2, tip - sz * 1.8 - 2);
+    ctx.lineTo(cx,          tip + 2);
+    ctx.closePath();
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+  }
+
+  // Hand label (! suffix when warning)
+  ctx.fillStyle  = isWarning ? '#ffaa00' : '#fff';
   ctx.font       = 'bold 11px sans-serif';
   ctx.textAlign  = 'center';
-  ctx.fillText(label, cx, tip - sz * 1.0);
+  ctx.fillText(isWarning ? label + '!' : label, cx, tip - sz * 1.0);
 
   // Subtle stem line from triangle to top of key
   ctx.strokeStyle = color;
@@ -1557,6 +1723,15 @@ function animate(ts) {
   if (currentStep !== prevStep)
     playStep(currentStep, false);
 
+  // Loop region: jump back to loopStart when loopEnd is reached
+  if (loopOn && loopEnd > loopStart && currentStep >= loopEnd) {
+    currentStep = loopStart;
+    accTime = plan[loopStart].time;
+    lastSoundStep = -1;
+    requestAnimationFrame(animate);
+    return;
+  }
+
   if (currentStep >= plan.length - 1) {
     isPlaying = false;
     document.getElementById('btnPlay').textContent = '\u25b6 Play';
@@ -1589,6 +1764,7 @@ document.getElementById('csvFile').addEventListener('change', function (e) {
       buildStepDivMap();
       updateUI(0);
       updateScoreCursor(0, 0);
+      updateTechChart();
     } catch (err) {
       document.getElementById('statusBar').textContent = 'Error: ' + err.message;
     }
@@ -1616,6 +1792,135 @@ document.getElementById('musicXmlFile').addEventListener('change', function (e) 
   };
   reader.readAsText(file);
 });
+
+// ═══════════════════════════════════════════════
+// LOOP REGION
+// ═══════════════════════════════════════════════
+function toggleLoop() {
+  loopOn = !loopOn;
+  document.getElementById('btnLoopToggle').classList.toggle('btn-active', loopOn);
+  document.getElementById('btnLoopIn').disabled  = !loopOn;
+  document.getElementById('btnLoopOut').disabled = !loopOn;
+  if (!loopOn) { loopStart = 0; loopEnd = 0; }
+  document.getElementById('statusBar').textContent =
+    loopOn ? 'Loop ON — use [ In / Out ] to set loop points' : 'Loop OFF';
+}
+
+function setLoopIn() {
+  loopStart = currentStep;
+  if (loopEnd <= loopStart) loopEnd = Math.min(plan.length - 1, loopStart + 8);
+  document.getElementById('statusBar').textContent =
+    `Loop: in = step ${loopStart + 1},  out = step ${loopEnd + 1}`;
+}
+
+function setLoopOut() {
+  loopEnd = currentStep;
+  if (loopEnd <= loopStart) loopStart = Math.max(0, loopEnd - 8);
+  document.getElementById('statusBar').textContent =
+    `Loop: in = step ${loopStart + 1},  out = step ${loopEnd + 1}`;
+}
+
+// ═══════════════════════════════════════════════
+// JUMP-TO-MEASURE
+// ═══════════════════════════════════════════════
+document.getElementById('jumpInput').addEventListener('keydown', function (e) {
+  if (e.key !== 'Enter') return;
+  const raw = this.value.trim().replace(/^m/i, '');
+  const msg = document.getElementById('jumpMsg');
+  if (!scoreData || !scoreData.measures.length) { msg.textContent = 'No score loaded'; return; }
+  if (!plan.length || !stepDivMap.length)        { msg.textContent = 'Load CSV first';  return; }
+  const m = scoreData.measures.find(m => m.label === raw || m.label === String(parseInt(raw)));
+  if (!m) { msg.textContent = `m${raw} not found`; return; }
+  let best = 0, bestDist = Infinity;
+  for (let i = 0; i < stepDivMap.length; i++) {
+    const d = Math.abs(stepDivMap[i] - m.startDiv);
+    if (d < bestDist) { bestDist = d; best = i; }
+  }
+  isPlaying = false;
+  document.getElementById('btnPlay').textContent = '\u25b6 Play';
+  currentStep = best;
+  accTime = plan[best].time;
+  updateUI(best);
+  msg.textContent = `\u2192 m${m.label}`;
+  this.blur();
+});
+
+// ═══════════════════════════════════════════════
+// CLICK-TO-SEEK ON SCORE SVG
+// ═══════════════════════════════════════════════
+document.getElementById('scoreSvg').addEventListener('mousedown', function (e) {
+  if (!scoreData || !scoreView || !plan.length || !stepDivMap.length) return;
+  const rect  = this.getBoundingClientRect();
+  const vb    = this.getAttribute('viewBox').split(' ');
+  const scale = parseFloat(vb[2]) / rect.width;
+  const clickX = (e.clientX - rect.left) * scale;
+  const relX = clickX - scoreView.padX;
+  if (relX < 0 || relX > scoreView.innerWidth) return;
+  const frac     = relX / scoreView.innerWidth;
+  const clickDiv = scoreView.windowStartDiv + frac * (scoreView.windowEndDiv - scoreView.windowStartDiv);
+  let best = 0, bestDist = Infinity;
+  for (let i = 0; i < stepDivMap.length; i++) {
+    const d = Math.abs(stepDivMap[i] - clickDiv);
+    if (d < bestDist) { bestDist = d; best = i; }
+  }
+  isPlaying = false;
+  document.getElementById('btnPlay').textContent = '\u25b6 Play';
+  currentStep = best;
+  accTime = plan[best].time;
+  updateUI(best);
+  playStep(best, true);
+});
+
+// ═══════════════════════════════════════════════
+// TECHNIQUE DISTRIBUTION CHART
+// ═══════════════════════════════════════════════
+function updateTechChart() {
+  const chart = document.getElementById('techChart');
+  if (!plan.length) {
+    chart.innerHTML = '<div style="font-family:\'Barlow\',sans-serif;font-size:9px;letter-spacing:0.1em;text-transform:uppercase;color:var(--dim)">Load a CSV to see distribution</div>';
+    return;
+  }
+  const counts = { normal: 0, black: 0, splay: 0, thumb: 0 };
+  let total = 0;
+  for (const step of plan) {
+    for (const cmd of [step.l_cmd || '', step.r_cmd || '']) {
+      for (const sub of cmd.split(';')) {
+        if (!sub || sub === 'X') continue;
+        const p = parseCmd(sub);
+        if (!p) continue;
+        const key = p.finger === 1 ? 'thumb' : p.tech;
+        counts[key] = (counts[key] || 0) + 1;
+        total++;
+      }
+    }
+  }
+  if (total === 0) { chart.innerHTML = '<div style="font-size:9px;color:var(--dim)">No data</div>'; return; }
+  const cfg = [
+    { key: 'normal', label: 'Normal', color: '#5599ff' },
+    { key: 'black',  label: 'Black',  color: '#2255aa' },
+    { key: 'splay',  label: 'Splay',  color: '#3377cc' },
+    { key: 'thumb',  label: 'Thumb',  color: '#39e5a8' },
+  ];
+  chart.innerHTML = cfg.map(t => {
+    const pct = Math.round((counts[t.key] || 0) / total * 100);
+    return `<div class="tech-bar-row">` +
+      `<div class="tech-bar-label">${t.label}</div>` +
+      `<div class="tech-bar-track"><div class="tech-bar-fill" style="width:${pct}%;background:${t.color}"></div></div>` +
+      `<div class="tech-bar-pct">${pct}%</div>` +
+      `</div>`;
+  }).join('');
+}
+
+// ═══════════════════════════════════════════════
+// EXPORT PNG
+// ═══════════════════════════════════════════════
+function exportPng() {
+  const canvas = document.getElementById('pianoCanvas');
+  const link = document.createElement('a');
+  link.download = `piano_step_${currentStep + 1}.png`;
+  link.href = canvas.toDataURL('image/png');
+  link.click();
+}
 
 // Speed label update
 document.getElementById('speedSlider').addEventListener('input', function () {
