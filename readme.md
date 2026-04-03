@@ -434,6 +434,7 @@ python findOptimalHandPos.py [file] [options]
 | `--penalty <n>` | int | `4` | Cost multiplier per key of thumb movement. Higher values favour keeping the hand still and stretching fingers; lower values allow more hand repositioning. |
 | `--gap <n>` | int | `6` | Minimum white keys that must always separate the left thumb from the right thumb. Prevents the two hands from physically colliding. Decrease only if your robot's hands are narrow. |
 | `--transpose` | flag | off | Transpose the score to C major (major key) or A minor (minor key), eliminating all black key notes. **Legacy mode** — changes the musical pitch. Only use if your hardware cannot reach black keys. |
+| `--playback-speed <n>` | float | — | Scale the output playback speed. `0.5` = half speed (timestamps doubled), `2.0` = double speed (timestamps halved). When omitted and velocity violations are detected, the optimizer will prompt you to auto-slow the output to a playable speed. |
 
 ---
 
@@ -564,6 +565,16 @@ python findOptimalHandPos.py fuyunohanashi1.musicxml \
     --split-max-change 5 \
     --lookahead 4
 python verify_fingering.py --verbose
+```
+
+### Slow down a song for playback
+
+```bash
+# Manually set half speed
+python findOptimalHandPos.py starspanbanner.musicxml --playback-speed 0.5
+
+# Or let the optimizer detect and suggest — it will prompt you if velocity violations are found
+python findOptimalHandPos.py starspanbanner.musicxml --speed 1
 ```
 
 ### Export verification report as JSON

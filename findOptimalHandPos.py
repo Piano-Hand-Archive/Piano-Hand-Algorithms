@@ -2306,6 +2306,88 @@ def save_outputs(l_cmd, r_cmd, l_path, r_path, l_groups, r_groups, split, note_g
 
 
 # ==========================================
+# PLAYBACK SPEED SCALING
+# Scales all timestamps in output command files by a given factor.
+# A factor of 2.0 means the song plays at half speed (timestamps are doubled).
+# A factor of 0.5 means the song plays at double speed (timestamps are halved).
+# ==========================================
+
+def scale_command_timestamps(output_dir, speed_factor):
+    """
+    Scale all timestamps in the output command files by the given factor.
+    speed_factor < 1.0 = slower playback (e.g. 0.5 = half speed, timestamps * 2)
+    speed_factor > 1.0 = faster playback (e.g. 2.0 = double speed, timestamps * 0.5)
+    """
+    time_multiplier = 1.0 / speed_factor
+
+    for filename in ["left_hand_commands.txt", "right_hand_commands.txt"]:
+        filepath = os.path.join(output_dir, filename)
+        if not os.path.exists(filepath):
+            continue
+
+        with open(filepath, 'r') as f:
+            lines = f.readlines()
+
+        scaled_lines = []
+        for line in lines:
+            line = line.strip()
+            if not line:
+                continue
+            # Format: <timestamp>:<command>
+            # e.g. "1.000:step:C4-C4" or "1.000:servo:3"
+            colon_idx = line.index(':')
+            old_time = float(line[:colon_idx])
+            rest = line[colon_idx:]
+            new_time = old_time * time_multiplier
+            scaled_lines.append(f"{new_time:.3f}{rest}")
+
+        with open(filepath, 'w') as f:
+            f.write('\n'.join(scaled_lines))
+
+    # Also scale timestamps in fingering_plan.csv (first column is Time)
+    plan_path = os.path.join(output_dir, "fingering_plan.csv")
+    if os.path.exists(plan_path):
+        with open(plan_path, 'r', newline='') as f:
+            reader = csv.reader(f)
+            rows = list(reader)
+
+        if rows:
+            # First row is header, rest have timestamp in column 0
+            for i in range(1, len(rows)):
+                try:
+                    old_time = float(rows[i][0])
+                    rows[i][0] = f"{old_time * time_multiplier:.3f}"
+                except (ValueError, IndexError):
+                    pass
+
+            with open(plan_path, 'w', newline='') as f:
+                writer = csv.writer(f)
+                writer.writerows(rows)
+
+    print(f"  ✓ Scaled all output timestamps by {time_multiplier:.2f}x ({speed_factor:.0%} playback speed)")
+
+
+def get_worst_velocity_violation(issues):
+    """
+    Parse velocity violation messages from validate_output() and return the
+    worst (highest) keys/sec value found. Returns None if no velocity violations.
+    """
+    worst_velocity = 0.0
+    for issue in issues:
+        if "Velocity Violation" in issue:
+            # Format: "... X keys in Ys (Z keys/sec) ..."
+            try:
+                ks_start = issue.index('(') + 1
+                ks_end = issue.index(' keys/sec')
+                velocity = float(issue[ks_start:ks_end])
+                if velocity > worst_velocity:
+                    worst_velocity = velocity
+            except (ValueError, IndexError):
+                pass
+    return worst_velocity if worst_velocity > 0 else None
+
+ 
+# ==========================================
 # MAIN EXECUTION
 # ==========================================
 
@@ -2362,6 +2444,11 @@ Examples:
                         help='Maximum keys split can shift between segments (default: 3)')
     parser.add_argument('--segment-size', type=int, default=8,
                         help='Time steps per segment for split optimization (default: 8)')
+
+    # Playback speed scaling
+    parser.add_argument('--playback-speed', type=float, default=None,
+                        help='Scale output playback speed (e.g. 0.5 = half speed, 2.0 = double speed). '
+                             'If not set and velocity violations are found, you will be prompted to auto-slow.')
 
     return parser.parse_args()
 
@@ -2593,6 +2680,38 @@ def main():
     print("  • '-' = toward lower keys (left on keyboard)")
     print("  • '+' = toward higher keys (right on keyboard)")
     print("=" * 60)
+
+    # ==========================================
+    # PLAYBACK SPEED SCALING (Post-processing)
+    # If --playback-speed was provided, scale output timestamps directly.
+    # If not provided but velocity violations were found, prompt the user
+    # to auto-slow the output to a playable speed.
+    # ==========================================
+    playback_speed = args.playback_speed
+
+    if playback_speed is not None:
+        # Manual playback speed was specified via --playback-speed flag
+        print(f"\n📎 Applying playback speed: {playback_speed:.0%}...")
+        scale_command_timestamps(args.output, playback_speed)
+    elif issues:
+        # Check if any of the safety issues were velocity violations
+        worst_velocity = get_worst_velocity_violation(issues)
+        if worst_velocity is not None:
+            # Calculate the speed factor needed to bring the worst violation within limits
+            # e.g. worst=20 keys/sec, limit=10 → need to play at 10/20 = 0.5 (50% speed)
+            suggested_speed = MAX_KEYS_PER_SECOND / worst_velocity
+            print(f"\n⚠️  Velocity issue detected! Worst violation: {worst_velocity:.1f} keys/sec "
+                  f"(limit: {MAX_KEYS_PER_SECOND:.1f} keys/sec)")
+            print(f"   Suggested playback speed: {suggested_speed:.0%}")
+            try:
+                choice = input(f"   Slow down output to {suggested_speed:.0%} speed? [y/n]: ").strip().lower()
+            except (EOFError, KeyboardInterrupt):
+                choice = 'n'
+            if choice == 'y':
+                scale_command_timestamps(args.output, suggested_speed)
+                print(f"\n✓ Output files slowed to {suggested_speed:.0%} playback speed.")
+            else:
+                print("   Skipping speed adjustment. Output files remain at original speed.")
 
 
 if __name__ == '__main__':
