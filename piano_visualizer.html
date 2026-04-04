@@ -1,0 +1,1077 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Piano Fingering Visualizer</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;500;600;700&family=Barlow:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg:       #0c0c0c;
+      --s1:       #131313;
+      --s2:       #181818;
+      --line:     #1e1e1e;
+      --line-2:   #2a2a2a;
+      --text:     #f2f2f2;
+      --dim:      #c4c4c4;
+      --dim2:     #d8d8d8;
+      --accent:   #39e5a8;
+      --left:     #5599ff;
+      --right:    #ff7055;
+      --thumb:    #39e5a8;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Barlow', system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      padding: 24px 28px;
+      min-height: 100vh;
+    }
+
+    @keyframes in {
+      from { opacity: 0; transform: translateY(6px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+    body > * { animation: in 0.4s ease both; }
+    body > *:nth-child(1) { animation-delay: 0.00s; }
+    body > *:nth-child(2) { animation-delay: 0.05s; }
+    body > *:nth-child(3) { animation-delay: 0.10s; }
+    body > *:nth-child(4) { animation-delay: 0.15s; }
+    body > *:nth-child(5) { animation-delay: 0.20s; }
+    body > *:nth-child(6) { animation-delay: 0.26s; }
+    body > *:nth-child(7) { animation-delay: 0.32s; }
+
+    /* ── Header ── */
+    .app-header {
+      display: flex;
+      align-items: center;
+      gap: 20px;
+      margin-bottom: 18px;
+      padding-bottom: 16px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    h1 {
+      font-family: 'Syne', sans-serif;
+      font-size: 22px;
+      font-weight: 700;
+      color: var(--text);
+      letter-spacing: -0.01em;
+      line-height: 1;
+    }
+
+    h1 em {
+      font-style: normal;
+      color: var(--accent);
+    }
+
+    .app-subtitle {
+      font-family: 'Barlow', sans-serif;
+      font-size: 10px;
+      font-weight: 500;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: var(--dim);
+    }
+
+    /* ── Controls bar ── */
+    .controls {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 6px;
+      padding: 10px 14px;
+      background: var(--s1);
+      border: 1px solid var(--line);
+      margin-bottom: 8px;
+    }
+
+    .ctrl-sep {
+      width: 1px;
+      height: 18px;
+      background: var(--line-2);
+      margin: 0 4px;
+      flex-shrink: 0;
+    }
+
+    button {
+      background: transparent;
+      color: var(--dim2);
+      border: 1px solid var(--line-2);
+      padding: 4px 12px;
+      cursor: pointer;
+      font-family: 'Barlow', sans-serif;
+      font-size: 12px;
+      font-weight: 500;
+      letter-spacing: 0.04em;
+      transition: color 0.12s, border-color 0.12s;
+    }
+    button:hover  { color: var(--text); border-color: var(--dim); }
+    button:disabled { opacity: 0.2; cursor: default; }
+
+    label.file-btn {
+      background: transparent;
+      color: var(--accent);
+      border: 1px solid var(--accent);
+      padding: 4px 12px;
+      cursor: pointer;
+      font-family: 'Barlow', sans-serif;
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      transition: background 0.12s;
+      opacity: 0.85;
+    }
+    label.file-btn:hover { background: rgba(57,229,168,0.08); opacity: 1; }
+    input[type="file"] { display: none; }
+
+    .speed-wrap {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-family: 'Barlow', sans-serif;
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--dim);
+    }
+
+    input[type="range"] { accent-color: var(--accent); cursor: pointer; }
+
+    /* ── Timeline ── */
+    .timeline {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 8px 14px;
+      background: var(--s1);
+      border: 1px solid var(--line);
+      margin-bottom: 8px;
+    }
+    .timeline input[type="range"] { flex: 1; }
+    .timeline span {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11px;
+      color: var(--dim);
+      min-width: 72px;
+    }
+    .timeline span:last-child { text-align: right; }
+
+    /* ── Canvas wrapper ── */
+    .piano-wrap {
+      overflow-x: auto;
+      background: #080808;
+      border: 1px solid var(--line);
+      padding: 12px 10px 16px;
+      margin-bottom: 8px;
+    }
+    canvas { display: block; margin: 0 auto; }
+
+    /* ── Bottom grid ── */
+    .bottom-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 8px;
+    }
+
+    .panel {
+      background: var(--s1);
+      border: 1px solid var(--line);
+      padding: 14px 16px;
+    }
+
+    .panel h3 {
+      font-family: 'Syne', sans-serif;
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--dim2);
+      border-bottom: 1px solid var(--line);
+      padding-bottom: 8px;
+      margin-bottom: 10px;
+    }
+
+    .panel .row {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      padding: 4px 0;
+      border-bottom: 1px solid var(--line);
+    }
+    .panel .row:last-child { border-bottom: none; }
+
+    .panel .row span:first-child {
+      font-family: 'Barlow', sans-serif;
+      font-size: 9px;
+      font-weight: 600;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: var(--dim);
+    }
+    .panel .row strong {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11px;
+      font-weight: 400;
+      color: var(--text);
+    }
+
+    /* Legend */
+    .legend-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 7px 16px;
+    }
+    .legend-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-family: 'Barlow', sans-serif;
+      font-size: 11px;
+      font-weight: 400;
+      color: var(--dim2);
+    }
+    .swatch {
+      width: 10px;
+      height: 10px;
+      flex-shrink: 0;
+    }
+    .swatch.thumb { outline: 1px solid var(--text); outline-offset: 1px; }
+
+    /* Status bar */
+    .status {
+      margin-top: 8px;
+      padding: 7px 14px;
+      background: var(--s1);
+      border: 1px solid var(--line);
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 10px;
+      color: var(--dim);
+    }
+
+    /* Active button state */
+    button.btn-active { color: var(--accent); border-color: var(--accent); }
+
+    /* Technique distribution bars */
+    .tech-section { margin-top: 10px; }
+    .tech-bar-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin: 5px 0;
+    }
+    .tech-bar-label {
+      font-family: 'Barlow', sans-serif;
+      font-size: 9px;
+      font-weight: 600;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--dim);
+      width: 52px;
+      flex-shrink: 0;
+    }
+    .tech-bar-track {
+      flex: 1;
+      height: 3px;
+      background: var(--line-2);
+      position: relative;
+    }
+    .tech-bar-fill {
+      position: absolute;
+      left: 0; top: 0; height: 100%;
+      transition: width 0.4s ease;
+    }
+    .tech-bar-pct {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 9px;
+      color: var(--dim);
+      width: 30px;
+      text-align: right;
+      flex-shrink: 0;
+    }
+  </style>
+</head>
+<body>
+
+<header class="app-header">
+  <h1>Piano Fingering <em>Visualizer</em></h1>
+  <span class="app-subtitle">Hand Position Analysis</span>
+</header>
+
+<div class="controls">
+  <label class="file-btn" for="csvFile">Load CSV</label>
+  <input type="file" id="csvFile" accept=".csv">
+  <div class="ctrl-sep"></div>
+
+  <button id="btnPrev" onclick="stepBy(-1)" disabled>&#171; Prev</button>
+  <button id="btnPlay" onclick="togglePlay()" disabled>&#9654; Play</button>
+  <button id="btnNext" onclick="stepBy(1)"  disabled>Next &#187;</button>
+
+  <div class="ctrl-sep"></div>
+
+  <div class="speed-wrap">
+    Speed
+    <input type="range" id="speedSlider" min="0.1" max="5" step="0.1" value="1" style="width:80px">
+    <span id="speedLabel">1.0&#215;</span>
+  </div>
+
+  <div class="ctrl-sep"></div>
+
+  <button id="btnSound" onclick="toggleSound()" style="min-width:90px">&#9834; Sound On</button>
+  <div class="speed-wrap">
+    Vol
+    <input type="range" id="volSlider" min="0" max="1" step="0.05" value="0.5" style="width:70px"
+           oninput="setVolume(parseFloat(this.value))">
+  </div>
+
+  <div class="ctrl-sep"></div>
+
+  <button id="btnLoopToggle" onclick="toggleLoop()" title="Toggle loop (L)">Loop</button>
+  <button id="btnLoopIn"  onclick="setLoopIn()"  title="Set loop in point"  disabled>[ In</button>
+  <button id="btnLoopOut" onclick="setLoopOut()" title="Set loop out point" disabled>Out ]</button>
+
+  <div class="ctrl-sep"></div>
+
+  <button onclick="exportPng()" title="Save piano as PNG">Export PNG</button>
+</div>
+
+<div class="timeline">
+  <span id="tlTime">t = &#8212;</span>
+  <input type="range" id="stepSlider" min="0" max="0" value="0" oninput="onSlider(this.value)">
+  <span id="tlStep">&#8212; / &#8212;</span>
+</div>
+
+<div class="piano-wrap">
+  <canvas id="pianoCanvas"></canvas>
+</div>
+
+<div class="bottom-grid">
+  <!-- Left hand panel -->
+  <div class="panel">
+    <h3>Left Hand</h3>
+    <div class="row"><span>Thumb pos</span><strong id="lThumb">&#8212;</strong></div>
+    <div class="row"><span>Note(s)</span><strong id="lNotes">&#8212;</strong></div>
+    <div class="row"><span>Finger(s)</span><strong id="lFingers">&#8212;</strong></div>
+    <div class="row"><span>Technique</span><strong id="lTech">&#8212;</strong></div>
+    <div class="row"><span>Command</span><strong id="lCmd">&#8212;</strong></div>
+  </div>
+
+  <!-- Right hand panel -->
+  <div class="panel">
+    <h3>Right Hand</h3>
+    <div class="row"><span>Thumb pos</span><strong id="rThumb">&#8212;</strong></div>
+    <div class="row"><span>Note(s)</span><strong id="rNotes">&#8212;</strong></div>
+    <div class="row"><span>Finger(s)</span><strong id="rFingers">&#8212;</strong></div>
+    <div class="row"><span>Technique</span><strong id="rTech">&#8212;</strong></div>
+    <div class="row"><span>Command</span><strong id="rCmd">&#8212;</strong></div>
+  </div>
+
+  <!-- Technique distribution panel -->
+  <div class="panel">
+    <h3>Techniques</h3>
+    <div class="legend-grid" style="margin-bottom:8px">
+      <div class="legend-item"><div class="swatch" style="background:#5599ff"></div>L Normal</div>
+      <div class="legend-item"><div class="swatch" style="background:#ff7055"></div>R Normal</div>
+      <div class="legend-item"><div class="swatch" style="background:#2255aa"></div>L Black</div>
+      <div class="legend-item"><div class="swatch" style="background:#aa3322"></div>R Black</div>
+      <div class="legend-item"><div class="swatch" style="background:#3377cc"></div>L Splay</div>
+      <div class="legend-item"><div class="swatch" style="background:#cc4433"></div>R Splay</div>
+      <div class="legend-item"><div class="swatch thumb" style="background:#39e5a8"></div>Thumb</div>
+    </div>
+    <div class="tech-section" id="techChart">
+      <div style="font-family:'Barlow',sans-serif;font-size:9px;letter-spacing:0.1em;text-transform:uppercase;color:var(--dim)">Load a CSV to see distribution</div>
+    </div>
+  </div>
+</div>
+
+<div class="status" id="statusBar">Load a fingering_plan.csv to begin.</div>
+
+<script>
+// ═══════════════════════════════════════════════
+// CONSTANTS
+// ═══════════════════════════════════════════════
+const WW   = 16;   // white key width px
+const WH   = 118;  // white key height px
+const BW   = 10;   // black key width px
+const BH   = 74;   // black key height px
+const MRKH = 52;   // marker area above keyboard
+const PAD  = 10;   // horizontal canvas padding
+const NUM_WHITE = 52; // A0 .. C8
+
+// White key positions that have a black key to their RIGHT:
+// idx%7: 0=A(→A#), 1=B(no), 2=C(→C#), 3=D(→D#), 4=E(no), 5=F(→F#), 6=G(→G#)
+const HAS_BLACK_AFTER = new Set([0, 2, 3, 5, 6]);
+
+// Technique → color map
+const CLR = {
+  left: {
+    normal:          '#5599ff',
+    black:           '#2255aa',
+    splay:           '#3377cc',
+    thumb:           '#39e5a8',
+  },
+  right: {
+    normal:          '#ff7055',
+    black:           '#aa3322',
+    splay:           '#cc4433',
+    thumb:           '#39e5a8',
+  },
+};
+
+const SPAN_L  = 'rgba(85,153,255,0.12)';
+const SPAN_R  = 'rgba(255,112,85,0.12)';
+const TRI_L   = '#5599ff';
+const TRI_R   = '#ff7055';
+
+// ═══════════════════════════════════════════════
+// STATE
+// ═══════════════════════════════════════════════
+let plan          = [];
+let currentStep   = 0;
+let isPlaying     = false;
+let lastTS        = null;
+let accTime       = 0;
+let lastSoundStep = -1;
+
+// Loop region
+let loopOn    = false;
+let loopStart = 0;
+let loopEnd   = 0;
+
+// ═══════════════════════════════════════════════
+// AUDIO  (Web Audio API — lazy init on first gesture)
+// ═══════════════════════════════════════════════
+let audioCtx   = null;
+let masterGain = null;
+let soundOn    = true;
+
+// Semitone offsets from A for the 7 white-key positions (A,B,C,D,E,F,G)
+const WKI_MIDI_OFFSET = [0, 2, 3, 5, 7, 8, 10];
+
+function wkiToMidi(idx, isBlack) {
+  if (idx == null || isNaN(idx)) return null;
+  const group = Math.floor(idx / 7);
+  const pos   = idx % 7;
+  return 21 + group * 12 + WKI_MIDI_OFFSET[pos] + (isBlack ? 1 : 0);
+}
+
+function midiToFreq(midi) {
+  return 440 * Math.pow(2, (midi - 69) / 12);
+}
+
+function initAudio() {
+  if (audioCtx) return;
+  audioCtx   = new (window.AudioContext || window.webkitAudioContext)();
+  masterGain = audioCtx.createGain();
+  masterGain.gain.value = parseFloat(document.getElementById('volSlider').value);
+  masterGain.connect(audioCtx.destination);
+}
+
+function setVolume(v) {
+  if (masterGain) masterGain.gain.value = v;
+}
+
+function toggleSound() {
+  soundOn = !soundOn;
+  document.getElementById('btnSound').textContent = soundOn ? '\u266a Sound On' : '\u266a Sound Off';
+}
+
+function playNote(freq, duration, velocity = 0.55) {
+  if (!audioCtx || !soundOn) return;
+  if (audioCtx.state === 'suspended') audioCtx.resume();
+  const now = audioCtx.currentTime;
+
+  // Two oscillators: triangle fundamental + sine 2nd partial (for brightness)
+  const osc1 = audioCtx.createOscillator();
+  const osc2 = audioCtx.createOscillator();
+  const g1   = audioCtx.createGain();
+  const g2   = audioCtx.createGain();
+
+  osc1.type = 'triangle';
+  osc1.frequency.value = freq;
+  osc2.type = 'sine';
+  osc2.frequency.value = freq * 2;
+
+  const atk = 0.006;
+  const dec = 0.15;
+  const sus = velocity * 0.35;
+  const dur = Math.max(0.12, Math.min(duration, 2.5));
+  const rel = Math.min(dur * 0.6, 1.2);
+
+  // Fundamental envelope: attack → decay → sustain → release
+  g1.gain.setValueAtTime(0, now);
+  g1.gain.linearRampToValueAtTime(velocity, now + atk);
+  g1.gain.exponentialRampToValueAtTime(sus, now + atk + dec);
+  g1.gain.setValueAtTime(sus, now + dur - rel);
+  g1.gain.exponentialRampToValueAtTime(0.0001, now + dur);
+
+  // 2nd partial: quick bright transient only
+  g2.gain.setValueAtTime(0, now);
+  g2.gain.linearRampToValueAtTime(velocity * 0.25, now + atk);
+  g2.gain.exponentialRampToValueAtTime(0.0001, now + atk + dec * 0.35);
+
+  osc1.connect(g1); g1.connect(masterGain);
+  osc2.connect(g2); g2.connect(masterGain);
+  osc1.start(now); osc2.start(now);
+  osc1.stop(now + dur + 0.05);
+  osc2.stop(now + dur + 0.05);
+}
+
+function playStep(stepIdx, manual) {
+  if (!soundOn || stepIdx === lastSoundStep) return;
+  lastSoundStep = stepIdx;
+  initAudio();
+
+  const step     = plan[stepIdx];
+  if (!step) return;
+  const nextStep = plan[stepIdx + 1];
+  const duration = manual
+    ? 0.45
+    : (nextStep ? (nextStep.time - step.time) : 0.8);
+
+  const lHits = hitKeys(step.l_thumb, step.l_cmd, true);
+  const rHits = hitKeys(step.r_thumb, step.r_cmd, false);
+  for (const h of [...lHits, ...rHits]) {
+    const midi = wkiToMidi(h.keyIdx, h.isBlack);
+    if (midi == null) continue;
+    playNote(midiToFreq(midi), duration);
+  }
+}
+
+function darkenHex(hex, factor = 0.58) {
+  const m = String(hex || '').trim().match(/^#([0-9a-f]{6})$/i);
+  if (!m) return '#2563eb';
+  const n = m[1];
+  const r = Math.max(0, Math.min(255, Math.round(parseInt(n.slice(0, 2), 16) * factor)));
+  const g = Math.max(0, Math.min(255, Math.round(parseInt(n.slice(2, 4), 16) * factor)));
+  const b = Math.max(0, Math.min(255, Math.round(parseInt(n.slice(4, 6), 16) * factor)));
+  return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
+}
+
+// ═══════════════════════════════════════════════
+// GEOMETRY HELPERS
+// ═══════════════════════════════════════════════
+function whiteX(i)  { return PAD + i * WW; }
+function blackX(i)  { return whiteX(i) + WW - BW / 2; }
+function hasBlack(i){ return HAS_BLACK_AFTER.has(i % 7); }
+
+// ═══════════════════════════════════════════════
+// NOTE NAMING  (white key index → note name)
+// ═══════════════════════════════════════════════
+const N_NAMES = ['A','B','C','D','E','F','G'];
+function idxToName(idx) {
+  if (idx == null || isNaN(idx)) return '—';
+  const pos = idx % 7;
+  const oct = pos <= 1 ? Math.floor(idx / 7) : Math.floor(idx / 7) + 1;
+  return N_NAMES[pos] + oct;
+}
+
+// ═══════════════════════════════════════════════
+// FINGER COMMAND PARSER
+// ═══════════════════════════════════════════════
+function parseCmd(cmd) {
+  if (!cmd || cmd === 'X') return null;
+  const m = cmd.match(/^(\d)([bs])?([+-])?(\d+)?$/);
+  if (!m) return null;
+  const finger = parseInt(m[1]);
+  const tc     = m[2] || '';
+  const dc     = m[3] || '';
+  const dist   = m[4] ? parseInt(m[4]) : 0;
+  const tech   = tc === 'b' ? 'black' : tc === 's' ? 'splay' : 'normal';
+  const dir    = dc === '+' ? 1 : dc === '-' ? -1 : 0;
+  return { finger, tech, dir, dist };
+}
+
+// Returns [{keyIdx, isBlack, finger, tech, isThumb}]
+function hitKeys(thumbIdx, cmdStr, isLeft) {
+  if (thumbIdx == null || !cmdStr) return [];
+  const out = [];
+  for (const sub of cmdStr.split(';')) {
+    if (!sub || sub === 'X') continue;
+    const p = parseCmd(sub);
+    if (!p) continue;
+    let reach = p.finger;
+    if (p.tech === 'splay') {
+      if (p.finger === 1) reach = 1 - p.dist;
+      else if (p.finger === 5) reach = 5 + p.dist;
+    }
+    const ki = isLeft ? (thumbIdx - reach + 1) : (thumbIdx + reach - 1);
+    out.push({ keyIdx: ki, isBlack: p.tech === 'black',
+               finger: p.finger, tech: p.tech, isThumb: p.finger === 1 });
+  }
+  return out;
+}
+
+// ═══════════════════════════════════════════════
+// CSV PARSER
+// ═══════════════════════════════════════════════
+function parseCSV(text) {
+  const lines   = text.replace(/\r/g, '').trim().split('\n');
+  const headers = lines[0].split(',');
+  const col     = h => headers.indexOf(h);
+  const rows    = [];
+  for (let i = 1; i < lines.length; i++) {
+    const c = lines[i].split(',');
+    const intOrNull = v => (v && v.trim()) ? parseInt(v) : null;
+    rows.push({
+      time       : parseFloat(c[col('Time')]),
+      l_notes    : (c[col('L_Notes')]    || '').trim(),
+      l_thumb    : intOrNull(c[col('L_Thumb')]),
+      l_fingers  : (c[col('L_Fingers')] || '').trim(),
+      l_tech     : (c[col('L_Techniques')] || '').trim(),
+      l_cmd      : (c[col('L_Commands')] || '').trim(),
+      r_notes    : (c[col('R_Notes')]    || '').trim(),
+      r_thumb    : intOrNull(c[col('R_Thumb')]),
+      r_fingers  : (c[col('R_Fingers')] || '').trim(),
+      r_tech     : (c[col('R_Techniques')] || '').trim(),
+      r_cmd      : (c[col('R_Commands')] || '').trim(),
+    });
+  }
+  return rows;
+}
+
+// ═══════════════════════════════════════════════
+// DRAWING
+// ═══════════════════════════════════════════════
+function draw(step) {
+  const canvas = document.getElementById('pianoCanvas');
+  const ctx    = canvas.getContext('2d');
+  const cw     = PAD * 2 + NUM_WHITE * WW;
+  const ch     = MRKH + WH + 20;   // extra 20 for note labels
+  canvas.width  = cw;
+  canvas.height = ch;
+
+  // Background
+  ctx.fillStyle = '#080808';
+  ctx.fillRect(0, 0, cw, ch);
+
+  const ky = MRKH; // top of keys
+
+  // ── Span backgrounds ──
+  if (step) {
+    if (step.l_thumb != null) {
+      const s = Math.max(0, step.l_thumb - 4), e = step.l_thumb;
+      ctx.fillStyle = SPAN_L;
+      ctx.fillRect(whiteX(s), ky, whiteX(e) + WW - whiteX(s), WH);
+    }
+    if (step.r_thumb != null) {
+      const s = step.r_thumb, e = Math.min(NUM_WHITE - 1, step.r_thumb + 4);
+      ctx.fillStyle = SPAN_R;
+      ctx.fillRect(whiteX(s), ky, whiteX(e) + WW - whiteX(s), WH);
+    }
+  }
+
+  // ── Ghost notes (next 2 lookahead steps) ──
+  function buildHitMap(s) {
+    const w = new Map(), b = new Map();
+    if (!s) return { w, b };
+    function addH(hits, side) {
+      for (const h of hits) {
+        const col = h.isThumb ? CLR[side].thumb : (CLR[side][h.tech] || CLR[side].normal);
+        if (h.isBlack) { if (!b.has(h.keyIdx)) b.set(h.keyIdx, col); }
+        else            { if (!w.has(h.keyIdx)) w.set(h.keyIdx, col); }
+      }
+    }
+    addH(hitKeys(s.l_thumb, s.l_cmd, true),  'left');
+    addH(hitKeys(s.r_thumb, s.r_cmd, false), 'right');
+    return { w, b };
+  }
+
+  for (const [offset, alpha] of [[2, 0.12], [1, 0.26]]) {
+    const gs = plan[currentStep + offset];
+    if (!gs) continue;
+    const { w: gW, b: gB } = buildHitMap(gs);
+    ctx.globalAlpha = alpha;
+    for (const [ki, col] of gW) {
+      ctx.fillStyle = col;
+      ctx.fillRect(whiteX(ki) + 1, ky, WW - 2, WH - 1);
+    }
+    for (const [ki, col] of gB) {
+      ctx.fillStyle = col;
+      ctx.fillRect(blackX(ki), ky, BW, BH);
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  // ── Build current highlight map ──
+  const hlW = new Map();
+  const hlB = new Map();
+
+  if (step) {
+    function addHits(hitsArr, side) {
+      for (const h of hitsArr) {
+        const color = h.isThumb ? CLR[side].thumb : (CLR[side][h.tech] || CLR[side].normal);
+        const entry = { color, label: String(h.finger), isThumb: h.isThumb };
+        if (h.isBlack) {
+          if (!hlB.has(h.keyIdx)) hlB.set(h.keyIdx, entry);
+        } else {
+          if (!hlW.has(h.keyIdx)) hlW.set(h.keyIdx, entry);
+        }
+      }
+    }
+    addHits(hitKeys(step.l_thumb, step.l_cmd, true),  'left');
+    addHits(hitKeys(step.r_thumb, step.r_cmd, false), 'right');
+  }
+
+  // ── Draw white keys ──
+  for (let i = 0; i < NUM_WHITE; i++) {
+    const x  = whiteX(i);
+    const hl = hlW.get(i);
+    const press = hl ? 3 : 0;  // pressed keys drawn 3px lower
+
+    ctx.fillStyle   = hl ? hl.color : '#e8e8e8';
+    ctx.strokeStyle = '#1a1a1a';
+    ctx.lineWidth   = 1;
+    ctx.fillRect  (x + 1, ky + press, WW - 2, WH - 1 - press);
+    ctx.strokeRect(x + 1, ky + press, WW - 2, WH - 1 - press);
+
+    if (hl) {
+      ctx.fillStyle  = 'rgba(255,255,255,0.92)';
+      ctx.font       = 'bold 9px sans-serif';
+      ctx.textAlign  = 'center';
+      ctx.fillText(hl.label, x + WW / 2, ky + press + WH - 9);
+      if (hl.isThumb) {
+        ctx.strokeStyle = '#fff';
+        ctx.lineWidth   = 2;
+        ctx.strokeRect(x + 2, ky + press + 1, WW - 4, WH - 4 - press);
+        ctx.lineWidth   = 1;
+      }
+    }
+
+    // C-note label below key
+    if (i % 7 === 2) {
+      ctx.fillStyle  = hl ? '#39e5a8' : '#2e2e2e';
+      ctx.font       = '8px sans-serif';
+      ctx.textAlign  = 'center';
+      ctx.fillText(idxToName(i), x + WW / 2, ky + WH + 12);
+    }
+  }
+
+  // ── Draw black keys (on top) ──
+  for (let i = 0; i < NUM_WHITE - 1; i++) {
+    if (!hasBlack(i)) continue;
+    const x  = blackX(i);
+    const hl = hlB.get(i);
+    const press = hl ? 3 : 0;
+
+    ctx.fillStyle   = hl ? hl.color : '#111';
+    ctx.strokeStyle = '#050505';
+    ctx.lineWidth   = 1;
+    ctx.fillRect  (x, ky + press, BW, BH - press);
+    ctx.strokeRect(x, ky + press, BW, BH - press);
+
+    if (hl) {
+      ctx.fillStyle  = 'rgba(255,255,255,0.92)';
+      ctx.font       = 'bold 8px sans-serif';
+      ctx.textAlign  = 'center';
+      ctx.fillText(hl.label, x + BW / 2, ky + press + BH - 8);
+      if (hl.isThumb) {
+        ctx.strokeStyle = '#fff';
+        ctx.lineWidth   = 1.5;
+        ctx.strokeRect(x + 1, ky + press + 1, BW - 2, BH - 2 - press);
+        ctx.lineWidth   = 1;
+      }
+    }
+  }
+
+  // ── Thumb position triangles ──
+  if (step) {
+    const prevStep = plan[currentStep - 1] || null;
+    const lShift = prevStep && prevStep.l_thumb != null && step.l_thumb != null
+      ? Math.abs(step.l_thumb - prevStep.l_thumb) : 0;
+    const rShift = prevStep && prevStep.r_thumb != null && step.r_thumb != null
+      ? Math.abs(step.r_thumb - prevStep.r_thumb) : 0;
+    drawThumb(ctx, step.l_thumb, lShift >= 5 ? '#ffaa00' : TRI_L, 'L', ky, lShift >= 5);
+    drawThumb(ctx, step.r_thumb, rShift >= 5 ? '#ffaa00' : TRI_R, 'R', ky, rShift >= 5);
+  }
+}
+
+function drawThumb(ctx, thumbIdx, color, label, ky, isWarning = false) {
+  if (thumbIdx == null) return;
+  const cx  = whiteX(thumbIdx) + WW / 2;
+  const tip = ky - 4;
+  const sz  = 10;
+
+  // Triangle pointing down to the key
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.moveTo(cx - sz, tip - sz * 1.8);
+  ctx.lineTo(cx + sz, tip - sz * 1.8);
+  ctx.lineTo(cx,      tip);
+  ctx.closePath();
+  ctx.fill();
+
+  // Warning ring when large position shift
+  if (isWarning) {
+    ctx.strokeStyle = '#ffaa00';
+    ctx.lineWidth   = 1.5;
+    ctx.globalAlpha = 0.7;
+    ctx.beginPath();
+    ctx.moveTo(cx - sz - 2, tip - sz * 1.8 - 2);
+    ctx.lineTo(cx + sz + 2, tip - sz * 1.8 - 2);
+    ctx.lineTo(cx,          tip + 2);
+    ctx.closePath();
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+  }
+
+  // Hand label (! suffix when warning)
+  ctx.fillStyle  = isWarning ? '#ffaa00' : '#fff';
+  ctx.font       = 'bold 11px sans-serif';
+  ctx.textAlign  = 'center';
+  ctx.fillText(isWarning ? label + '!' : label, cx, tip - sz * 1.0);
+
+  // Subtle stem line from triangle to top of key
+  ctx.strokeStyle = color;
+  ctx.lineWidth   = 1;
+  ctx.globalAlpha = 0.4;
+  ctx.beginPath();
+  ctx.moveTo(cx, tip);
+  ctx.lineTo(cx, ky);
+  ctx.stroke();
+  ctx.globalAlpha = 1;
+  ctx.lineWidth   = 1;
+}
+
+// ═══════════════════════════════════════════════
+// UI UPDATE
+// ═══════════════════════════════════════════════
+function updateUI(idx, shouldAutoScroll = true) {
+  const step = plan[idx] || null;
+
+  document.getElementById('tlTime').textContent =
+    step ? `t = ${step.time.toFixed(2)}s` : 't = \u2014';
+  document.getElementById('tlStep').textContent =
+    plan.length ? `${idx + 1} / ${plan.length}` : '\u2014 / \u2014';
+  document.getElementById('stepSlider').value = idx;
+
+  // Left hand info
+  document.getElementById('lThumb').textContent =
+    (step && step.l_thumb != null) ? `${idxToName(step.l_thumb)} (${step.l_thumb})` : '\u2014';
+  document.getElementById('lNotes').textContent    = (step && step.l_notes)   || '\u2014';
+  document.getElementById('lFingers').textContent  = (step && step.l_fingers) || '\u2014';
+  document.getElementById('lTech').textContent     = (step && step.l_tech)    || '\u2014';
+  document.getElementById('lCmd').textContent      = (step && step.l_cmd)     || '\u2014';
+
+  // Right hand info
+  document.getElementById('rThumb').textContent =
+    (step && step.r_thumb != null) ? `${idxToName(step.r_thumb)} (${step.r_thumb})` : '\u2014';
+  document.getElementById('rNotes').textContent    = (step && step.r_notes)   || '\u2014';
+  document.getElementById('rFingers').textContent  = (step && step.r_fingers) || '\u2014';
+  document.getElementById('rTech').textContent     = (step && step.r_tech)    || '\u2014';
+  document.getElementById('rCmd').textContent      = (step && step.r_cmd)     || '\u2014';
+
+  draw(step);
+
+  // Auto-scroll piano to active region
+  if (step && shouldAutoScroll) {
+    const thumbIdx = [step.l_thumb, step.r_thumb].filter(v => v != null);
+    if (thumbIdx.length) {
+      const activeIdx = thumbIdx.reduce((a, b) => a + b, 0) / thumbIdx.length;
+      const wrap   = document.querySelector('.piano-wrap');
+      const target = (whiteX(activeIdx) + WW / 2) - wrap.clientWidth / 2;
+      wrap.scrollTo({ left: Math.max(0, target), behavior: 'smooth' });
+    }
+  }
+}
+
+function stepBy(delta) {
+  currentStep = Math.max(0, Math.min(plan.length - 1, currentStep + delta));
+  updateUI(currentStep);
+  playStep(currentStep, true);
+}
+
+function onSlider(val) {
+  currentStep = parseInt(val);
+  updateUI(currentStep);
+  playStep(currentStep, true);
+}
+
+// ═══════════════════════════════════════════════
+// PLAYBACK
+// ═══════════════════════════════════════════════
+function togglePlay() {
+  if (!isPlaying && plan.length && currentStep >= plan.length - 1) {
+    currentStep = 0;
+    updateUI(0, true);
+  }
+  isPlaying = !isPlaying;
+  document.getElementById('btnPlay').textContent = isPlaying ? '\u23f8 Pause' : '\u25b6 Play';
+  if (isPlaying) {
+    initAudio();
+    lastSoundStep = -1; // allow replaying current step on resume
+    accTime = (plan[currentStep] || plan[0]).time;
+    lastTS  = null;
+    requestAnimationFrame(animate);
+  }
+}
+
+function animate(ts) {
+  if (!isPlaying) return;
+  if (lastTS == null) lastTS = ts;
+  const elapsed = (ts - lastTS) / 1000;
+  lastTS = ts;
+
+  const speed = parseFloat(document.getElementById('speedSlider').value);
+  accTime += elapsed * speed;
+
+  const prevStep = currentStep;
+  // Advance to the latest step whose time <= accTime
+  while (currentStep < plan.length - 1 && plan[currentStep + 1].time <= accTime)
+    currentStep++;
+
+  updateUI(currentStep, currentStep !== prevStep);
+
+  if (currentStep !== prevStep)
+    playStep(currentStep, false);
+
+  // Loop region: jump back to loopStart when loopEnd is reached
+  if (loopOn && loopEnd > loopStart && currentStep >= loopEnd) {
+    currentStep = loopStart;
+    accTime = plan[loopStart].time;
+    lastSoundStep = -1;
+    requestAnimationFrame(animate);
+    return;
+  }
+
+  if (currentStep >= plan.length - 1) {
+    isPlaying = false;
+    document.getElementById('btnPlay').textContent = '\u25b6 Play';
+    return;
+  }
+
+  requestAnimationFrame(animate);
+}
+
+// ═══════════════════════════════════════════════
+// FILE LOADING
+// ═══════════════════════════════════════════════
+document.getElementById('csvFile').addEventListener('change', function (e) {
+  const file = e.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = function (ev) {
+    try {
+      plan = parseCSV(ev.target.result);
+      currentStep = 0;
+      const slider = document.getElementById('stepSlider');
+      slider.max   = plan.length - 1;
+      slider.value = 0;
+      document.getElementById('btnPrev').disabled = false;
+      document.getElementById('btnPlay').disabled = false;
+      document.getElementById('btnNext').disabled = false;
+      document.getElementById('statusBar').textContent =
+        `Loaded ${plan.length} steps from \u201c${file.name}\u201d ` +
+        `(t = ${plan[0].time.toFixed(2)}s \u2026 ${plan[plan.length-1].time.toFixed(2)}s)`;
+      updateUI(0);
+      updateTechChart();
+    } catch (err) {
+      document.getElementById('statusBar').textContent = 'Error: ' + err.message;
+    }
+  };
+  reader.readAsText(file);
+});
+
+// ═══════════════════════════════════════════════
+// LOOP REGION
+// ═══════════════════════════════════════════════
+function toggleLoop() {
+  loopOn = !loopOn;
+  document.getElementById('btnLoopToggle').classList.toggle('btn-active', loopOn);
+  document.getElementById('btnLoopIn').disabled  = !loopOn;
+  document.getElementById('btnLoopOut').disabled = !loopOn;
+  if (!loopOn) { loopStart = 0; loopEnd = 0; }
+  document.getElementById('statusBar').textContent =
+    loopOn ? 'Loop ON — use [ In / Out ] to set loop points' : 'Loop OFF';
+}
+
+function setLoopIn() {
+  loopStart = currentStep;
+  if (loopEnd <= loopStart) loopEnd = Math.min(plan.length - 1, loopStart + 8);
+  document.getElementById('statusBar').textContent =
+    `Loop: in = step ${loopStart + 1},  out = step ${loopEnd + 1}`;
+}
+
+function setLoopOut() {
+  loopEnd = currentStep;
+  if (loopEnd <= loopStart) loopStart = Math.max(0, loopEnd - 8);
+  document.getElementById('statusBar').textContent =
+    `Loop: in = step ${loopStart + 1},  out = step ${loopEnd + 1}`;
+}
+
+// ═══════════════════════════════════════════════
+// TECHNIQUE DISTRIBUTION CHART
+// ═══════════════════════════════════════════════
+function updateTechChart() {
+  const chart = document.getElementById('techChart');
+  if (!plan.length) {
+    chart.innerHTML = '<div style="font-family:\'Barlow\',sans-serif;font-size:9px;letter-spacing:0.1em;text-transform:uppercase;color:var(--dim)">Load a CSV to see distribution</div>';
+    return;
+  }
+  const counts = { normal: 0, black: 0, splay: 0, thumb: 0 };
+  let total = 0;
+  for (const step of plan) {
+    for (const cmd of [step.l_cmd || '', step.r_cmd || '']) {
+      for (const sub of cmd.split(';')) {
+        if (!sub || sub === 'X') continue;
+        const p = parseCmd(sub);
+        if (!p) continue;
+        const key = p.finger === 1 ? 'thumb' : p.tech;
+        counts[key] = (counts[key] || 0) + 1;
+        total++;
+      }
+    }
+  }
+  if (total === 0) { chart.innerHTML = '<div style="font-size:9px;color:var(--dim)">No data</div>'; return; }
+  const cfg = [
+    { key: 'normal', label: 'Normal', color: '#5599ff' },
+    { key: 'black',  label: 'Black',  color: '#2255aa' },
+    { key: 'splay',  label: 'Splay',  color: '#3377cc' },
+    { key: 'thumb',  label: 'Thumb',  color: '#39e5a8' },
+  ];
+  chart.innerHTML = cfg.map(t => {
+    const pct = Math.round((counts[t.key] || 0) / total * 100);
+    return `<div class="tech-bar-row">` +
+      `<div class="tech-bar-label">${t.label}</div>` +
+      `<div class="tech-bar-track"><div class="tech-bar-fill" style="width:${pct}%;background:${t.color}"></div></div>` +
+      `<div class="tech-bar-pct">${pct}%</div>` +
+      `</div>`;
+  }).join('');
+}
+
+// ═══════════════════════════════════════════════
+// EXPORT PNG
+// ═══════════════════════════════════════════════
+function exportPng() {
+  const canvas = document.getElementById('pianoCanvas');
+  const link = document.createElement('a');
+  link.download = `piano_step_${currentStep + 1}.png`;
+  link.href = canvas.toDataURL('image/png');
+  link.click();
+}
+
+// Speed label update
+document.getElementById('speedSlider').addEventListener('input', function () {
+  document.getElementById('speedLabel').textContent = parseFloat(this.value).toFixed(1) + '\u00d7';
+});
+
+// Keyboard shortcuts
+document.addEventListener('keydown', function (e) {
+  if (!plan.length) return;
+  if (e.target.tagName === 'INPUT') return;
+  if (e.code === 'Space')       { e.preventDefault(); togglePlay(); }
+  if (e.code === 'ArrowRight')  { isPlaying = false; document.getElementById('btnPlay').textContent='\u25b6 Play'; stepBy(1); }
+  if (e.code === 'ArrowLeft')   { isPlaying = false; document.getElementById('btnPlay').textContent='\u25b6 Play'; stepBy(-1); }
+});
+
+// Initial blank piano
+draw(null);
+</script>
+</body>
+</html>
