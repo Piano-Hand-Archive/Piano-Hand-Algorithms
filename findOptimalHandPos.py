@@ -300,10 +300,11 @@ def convert_to_timed_steps(note_info):
     return timed_steps
 
 
-def save_timed_steps_csv(timed_steps, output_dir="."):
+def save_timed_steps_csv(timed_steps, output_dir=".", prefix=""):
     """Save intermediate timed steps to CSV for debugging and optimizer input."""
     os.makedirs(output_dir, exist_ok=True)
-    with open(os.path.join(output_dir, "timed_steps.csv"), "w", newline="") as f:
+    fname = f"{prefix}_timed_steps.csv" if prefix else "timed_steps.csv"
+    with open(os.path.join(output_dir, fname), "w", newline="") as f:
         writer = csv.writer(f)
         writer.writerow(["start_time", "midi", "duration", "white_key_index", "is_black"])
         for start_time, step in timed_steps:
@@ -2134,22 +2135,25 @@ def validate_output(l_path, r_path, note_groups, l_groups=None, r_groups=None):
 
 
 def save_outputs(l_cmd, r_cmd, l_path, r_path, l_groups, r_groups, split, note_groups, output_dir, time_shift=0.0,
-                 conflict_log=None):
+                 conflict_log=None, prefix=""):
     """Save all output files with enhanced fingering information including splay direction."""
     os.makedirs(output_dir, exist_ok=True)
 
     if conflict_log is None:
         conflict_log = []
 
+    def fname(base):
+        return os.path.join(output_dir, f"{prefix}_{base}" if prefix else base)
+
     # 1. Servo command files
-    with open(os.path.join(output_dir, "left_hand_commands.txt"), 'w') as f:
+    with open(fname("left_hand_commands.txt"), 'w') as f:
         f.write('\n'.join(l_cmd))
 
-    with open(os.path.join(output_dir, "right_hand_commands.txt"), 'w') as f:
+    with open(fname("right_hand_commands.txt"), 'w') as f:
         f.write('\n'.join(r_cmd))
 
     # 2. Fingering Plan CSV (enhanced with technique and direction info)
-    with open(os.path.join(output_dir, "fingering_plan.csv"), 'w', newline='') as f:
+    with open(fname("fingering_plan.csv"), 'w', newline='') as f:
         writer = csv.writer(f)
         writer.writerow(['Time', 'L_Notes', 'L_Thumb', 'L_Fingers', 'L_Techniques', 'L_Commands',
                          'R_Notes', 'R_Thumb', 'R_Fingers', 'R_Techniques', 'R_Commands'])
@@ -2210,7 +2214,7 @@ def save_outputs(l_cmd, r_cmd, l_path, r_path, l_groups, r_groups, split, note_g
             writer.writerow([time, l_n, l_t, l_f, l_tech, l_cmds, r_n, r_t, r_f, r_tech, r_cmds])
 
     # 3. Summary CSV
-    with open(os.path.join(output_dir, "fingering_summary.csv"), 'w', newline='') as f:
+    with open(fname("fingering_summary.csv"), 'w', newline='') as f:
         writer = csv.writer(f)
         writer.writerow(['Metric', 'Left Hand', 'Right Hand', 'Combined'])
 
@@ -2296,7 +2300,7 @@ def save_outputs(l_cmd, r_cmd, l_path, r_path, l_groups, r_groups, split, note_g
 
     # 4. Conflict Resolution Log (if any)
     if conflict_log:
-        with open(os.path.join(output_dir, "conflict_resolutions.txt"), 'w') as f:
+        with open(fname("conflict_resolutions.txt"), 'w') as f:
             f.write("Adjacent Key Conflict Resolution Log\n")
             f.write("=" * 50 + "\n\n")
             f.write("These notes had adjacent white+black key conflicts\n")
@@ -2362,6 +2366,8 @@ Examples:
                         help='Maximum keys split can shift between segments (default: 3)')
     parser.add_argument('--segment-size', type=int, default=8,
                         help='Time steps per segment for split optimization (default: 8)')
+    parser.add_argument('--prefix', default='',
+                        help='Prefix for output filenames (e.g. song name)')
 
     return parser.parse_args()
 
@@ -2466,12 +2472,13 @@ def main():
         sys.exit(1)
 
     timed_steps = convert_to_timed_steps(note_info)
-    save_timed_steps_csv(timed_steps, args.output)
+    save_timed_steps_csv(timed_steps, args.output, args.prefix)
+    timed_steps_fname = f"{args.prefix}_timed_steps.csv" if args.prefix else "timed_steps.csv"
     print("  ✓ timed_steps.csv generated")
 
     # Step 2: Load grouped notes
     print("\nSTEP 2: Loading notes for optimization...")
-    note_groups = load_notes_grouped_by_time(os.path.join(args.output, "timed_steps.csv"))
+    note_groups = load_notes_grouped_by_time(os.path.join(args.output, timed_steps_fname))
     print(f"  ✓ Loaded {len(note_groups)} time steps")
 
     # Step 3: Find optimal split point(s)
@@ -2569,7 +2576,7 @@ def main():
     # Step 7: Save all outputs
     print("\nSTEP 7: Saving output files...")
     save_outputs(l_cmd, r_cmd, l_path, r_path, l_groups, r_groups, split_point, note_groups, args.output, max_shift,
-                 conflict_log)
+                 conflict_log, args.prefix)
 
     print("\n" + "=" * 60)
     print("✓ OPTIMIZATION COMPLETE!")
