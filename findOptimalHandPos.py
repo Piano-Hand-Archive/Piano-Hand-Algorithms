@@ -2310,6 +2310,70 @@ def save_outputs(l_cmd, r_cmd, l_path, r_path, l_groups, r_groups, split, note_g
 
 
 # ==========================================
+# RIGHT-HAND-ONLY HELPERS
+# ==========================================
+
+def _chord_is_rh_playable(notes, is_black_list):
+    """Return True if some right-hand thumb position can cover all notes without finger collision."""
+    if not notes:
+        return True
+    notes_with_black = list(zip(notes, is_black_list))
+    min_note = min(notes)
+    max_note = max(notes)
+    search_start = max(0, max_note - 4 - MAX_OUTER_SPLAY)
+    search_end = min_note + MAX_OUTER_SPLAY
+    for thumb_pos in range(search_start, search_end + 1):
+        can_reach, _, _ = can_reach_all_notes(thumb_pos, notes_with_black, "right")
+        if can_reach:
+            return True
+    return False
+
+
+def trim_groups_to_rh_span(note_groups):
+    """
+    For right-hand-only mode: prepare note groups so a single hand can play them.
+
+    Two passes:
+    1. Within each time step, drop the lowest notes of any chord that can't be
+       played by the right hand alone (checks real finger assignments, not just
+       span). Preserves melody (highest notes).
+    2. Clip every note's duration to the start of the next time step so that
+       sustained notes never combine with new notes to create impossible reach.
+    """
+    trimmed = 0
+
+    # Pass 1: trim chords that can't be played by a single right hand
+    for group in note_groups:
+        if group is None:
+            continue
+        notes = group['notes']
+        is_black_list = group.get('is_black', [False] * len(notes))
+        if len(notes) <= 1:
+            continue
+        while len(notes) > 1 and not _chord_is_rh_playable(notes, is_black_list):
+            lowest_idx = notes.index(min(notes))
+            for field in ('notes', 'durations', 'keys', 'midi_notes', 'is_black'):
+                if field in group:
+                    group[field].pop(lowest_idx)
+            is_black_list = group.get('is_black', [False] * len(group['notes']))
+            trimmed += 1
+
+    # Pass 2: clip durations so no note is still held when the next step starts
+    for i, group in enumerate(note_groups):
+        if group is None:
+            continue
+        if i + 1 < len(note_groups) and note_groups[i + 1] is not None:
+            next_time = note_groups[i + 1]['time']
+            dur_cap = next_time - group['time'] - 0.001
+            group['durations'] = [min(d, max(dur_cap, 0.001)) for d in group['durations']]
+
+    if trimmed:
+        print(f"  ℹ️  Trimmed {trimmed} out-of-reach note(s) to fit right-hand span")
+
+    return note_groups
+
+
+# ==========================================
 # MAIN EXECUTION
 # ==========================================
 
@@ -2368,6 +2432,8 @@ Examples:
                         help='Time steps per segment for split optimization (default: 8)')
     parser.add_argument('--prefix', default='',
                         help='Prefix for output filenames (e.g. song name)')
+    parser.add_argument('--rh-only', action='store_true',
+                        help='Assign all notes to the right hand (hardware failure mode)')
 
     return parser.parse_args()
 
@@ -2481,10 +2547,18 @@ def main():
     note_groups = load_notes_grouped_by_time(os.path.join(args.output, timed_steps_fname))
     print(f"  ✓ Loaded {len(note_groups)} time steps")
 
+    if args.rh_only:
+        note_groups = trim_groups_to_rh_span(note_groups)
+
     # Step 3: Find optimal split point(s)
     print("\nSTEP 3: Finding optimal split point...")
 
-    if DYNAMIC_SPLIT_ENABLED:
+    if args.rh_only:
+        # Force all notes to right hand by placing split well below any piano key
+        split_point = -10
+        split_sequence = None
+        print("  ✓ Right-hand-only mode: all notes routed to right hand")
+    elif DYNAMIC_SPLIT_ENABLED:
         # Use dynamic split optimization
         split_sequence = find_dynamic_split_points(note_groups)
         if not split_sequence:
@@ -2515,7 +2589,7 @@ def main():
             note_groups, split_sequence, resolve_conflicts=True
         )
     else:
-        # Use static split assignment
+        # Use static split assignment (rh_only uses split_point=-10 so all go right)
         l_groups, r_groups, conflict_log = assign_hands_to_notes(
             note_groups, split_point, resolve_conflicts=True
         )
@@ -2536,7 +2610,8 @@ def main():
         print("  Optimizing right hand (with dynamic boundaries)...")
         r_path = optimize_with_dynamic_boundaries(r_groups, "Right", split_sequence, is_left=False)
     else:
-        print("  Optimizing left hand...")
+        if not args.rh_only:
+            print("  Optimizing left hand...")
         l_path = optimize_with_boundaries(l_groups, "Left", max_boundary=split_point)
 
         print("  Optimizing right hand...")
